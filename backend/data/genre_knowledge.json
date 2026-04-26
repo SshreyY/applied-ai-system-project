@@ -1,0 +1,312 @@
+{
+  "genres": {
+    "lofi": {
+      "similar": ["ambient", "jazz", "indie folk", "bossa nova"],
+      "typical_attributes": {
+        "energy": [0.2, 0.5],
+        "tempo_bpm": [60, 90],
+        "acousticness": [0.6, 1.0],
+        "valence": [0.4, 0.7],
+        "danceability": [0.4, 0.7]
+      },
+      "description": "Lo-fi hip hop and downtempo beats. Warm, hazy, relaxed. Good for studying, focus, or unwinding."
+    },
+    "ambient": {
+      "similar": ["lofi", "classical", "world", "bossa nova"],
+      "typical_attributes": {
+        "energy": [0.1, 0.4],
+        "tempo_bpm": [50, 80],
+        "acousticness": [0.7, 1.0],
+        "valence": [0.3, 0.7],
+        "danceability": [0.2, 0.5]
+      },
+      "description": "Atmospheric, textural, minimal. Designed to create an environment rather than demand attention."
+    },
+    "pop": {
+      "similar": ["indie pop", "synthpop", "k-pop", "r&b"],
+      "typical_attributes": {
+        "energy": [0.6, 0.95],
+        "tempo_bpm": [100, 140],
+        "acousticness": [0.0, 0.4],
+        "valence": [0.6, 0.95],
+        "danceability": [0.6, 0.95]
+      },
+      "description": "Mainstream pop with catchy hooks, polished production, and broad appeal."
+    },
+    "indie pop": {
+      "similar": ["pop", "indie folk", "synthpop"],
+      "typical_attributes": {
+        "energy": [0.5, 0.85],
+        "tempo_bpm": [95, 130],
+        "acousticness": [0.2, 0.6],
+        "valence": [0.55, 0.9],
+        "danceability": [0.55, 0.85]
+      },
+      "description": "Independent pop with a more personal, slightly rougher aesthetic than mainstream pop."
+    },
+    "synthpop": {
+      "similar": ["pop", "synthwave", "electronic"],
+      "typical_attributes": {
+        "energy": [0.65, 0.9],
+        "tempo_bpm": [105, 135],
+        "acousticness": [0.0, 0.2],
+        "valence": [0.6, 0.9],
+        "danceability": [0.65, 0.9]
+      },
+      "description": "Pop music built on synthesizers with a retro or futuristic flavor."
+    },
+    "rock": {
+      "similar": ["metal", "indie pop", "electronic"],
+      "typical_attributes": {
+        "energy": [0.6, 0.95],
+        "tempo_bpm": [100, 160],
+        "acousticness": [0.0, 0.3],
+        "valence": [0.3, 0.7],
+        "danceability": [0.4, 0.75]
+      },
+      "description": "Guitar-driven music with strong rhythms. Ranges from classic rock to alternative and hard rock."
+    },
+    "metal": {
+      "similar": ["rock", "drum and bass"],
+      "typical_attributes": {
+        "energy": [0.85, 1.0],
+        "tempo_bpm": [140, 200],
+        "acousticness": [0.0, 0.1],
+        "valence": [0.1, 0.45],
+        "danceability": [0.35, 0.65]
+      },
+      "description": "Heavy, aggressive, and technically demanding. High intensity from start to finish."
+    },
+    "hip-hop": {
+      "similar": ["trap", "r&b", "soul"],
+      "typical_attributes": {
+        "energy": [0.6, 0.9],
+        "tempo_bpm": [80, 110],
+        "acousticness": [0.0, 0.3],
+        "valence": [0.4, 0.8],
+        "danceability": [0.7, 0.95]
+      },
+      "description": "Rhythm and poetry. Ranges from boom-bap to modern trap-influenced styles."
+    },
+    "trap": {
+      "similar": ["hip-hop", "electronic"],
+      "typical_attributes": {
+        "energy": [0.65, 0.9],
+        "tempo_bpm": [120, 150],
+        "acousticness": [0.0, 0.15],
+        "valence": [0.2, 0.6],
+        "danceability": [0.7, 0.95]
+      },
+      "description": "Heavy 808 bass, rapid hi-hat rolls, and dark atmospheric production."
+    },
+    "r&b": {
+      "similar": ["soul", "hip-hop", "pop"],
+      "typical_attributes": {
+        "energy": [0.4, 0.75],
+        "tempo_bpm": [80, 110],
+        "acousticness": [0.2, 0.6],
+        "valence": [0.5, 0.85],
+        "danceability": [0.55, 0.85]
+      },
+      "description": "Soulful vocals over smooth production. Ranges from classic soul-influenced to contemporary urban R&B."
+    },
+    "soul": {
+      "similar": ["r&b", "jazz", "blues"],
+      "typical_attributes": {
+        "energy": [0.4, 0.75],
+        "tempo_bpm": [75, 105],
+        "acousticness": [0.3, 0.7],
+        "valence": [0.55, 0.9],
+        "danceability": [0.55, 0.8]
+      },
+      "description": "Emotionally expressive vocals with gospel roots, warmth, and deep feeling."
+    },
+    "jazz": {
+      "similar": ["jazz fusion", "soul", "bossa nova", "lofi"],
+      "typical_attributes": {
+        "energy": [0.2, 0.6],
+        "tempo_bpm": [70, 120],
+        "acousticness": [0.6, 0.95],
+        "valence": [0.5, 0.85],
+        "danceability": [0.35, 0.65]
+      },
+      "description": "Improvisational acoustic music with complex harmony. From cool jazz to bebop."
+    },
+    "jazz fusion": {
+      "similar": ["jazz", "electronic", "soul"],
+      "typical_attributes": {
+        "energy": [0.5, 0.8],
+        "tempo_bpm": [90, 130],
+        "acousticness": [0.2, 0.6],
+        "valence": [0.5, 0.75],
+        "danceability": [0.5, 0.75]
+      },
+      "description": "Jazz combined with rock, funk, or electronic elements for a more energetic and complex sound."
+    },
+    "blues": {
+      "similar": ["soul", "folk", "country", "jazz"],
+      "typical_attributes": {
+        "energy": [0.3, 0.65],
+        "tempo_bpm": [70, 110],
+        "acousticness": [0.5, 0.9],
+        "valence": [0.2, 0.55],
+        "danceability": [0.4, 0.65]
+      },
+      "description": "Raw and emotional guitar-driven music rooted in African American musical tradition. Often melancholic."
+    },
+    "folk": {
+      "similar": ["indie folk", "country", "blues", "acoustic"],
+      "typical_attributes": {
+        "energy": [0.2, 0.55],
+        "tempo_bpm": [70, 105],
+        "acousticness": [0.7, 1.0],
+        "valence": [0.45, 0.8],
+        "danceability": [0.35, 0.6]
+      },
+      "description": "Acoustic storytelling with roots in traditional music. Emphasizes authenticity and narrative."
+    },
+    "indie folk": {
+      "similar": ["folk", "indie pop", "ambient"],
+      "typical_attributes": {
+        "energy": [0.25, 0.55],
+        "tempo_bpm": [72, 100],
+        "acousticness": [0.65, 0.95],
+        "valence": [0.45, 0.78],
+        "danceability": [0.35, 0.58]
+      },
+      "description": "Contemporary acoustic folk with an indie sensibility. Introspective, personal, and often melancholic."
+    },
+    "country": {
+      "similar": ["folk", "blues", "indie folk"],
+      "typical_attributes": {
+        "energy": [0.35, 0.75],
+        "tempo_bpm": [85, 120],
+        "acousticness": [0.5, 0.9],
+        "valence": [0.5, 0.85],
+        "danceability": [0.45, 0.75]
+      },
+      "description": "American roots music with storytelling lyrics, twang guitar, and themes of love, loss, and home."
+    },
+    "classical": {
+      "similar": ["ambient", "jazz", "world"],
+      "typical_attributes": {
+        "energy": [0.1, 0.5],
+        "tempo_bpm": [50, 120],
+        "acousticness": [0.8, 1.0],
+        "valence": [0.2, 0.7],
+        "danceability": [0.1, 0.45]
+      },
+      "description": "Orchestral and chamber music from the Western tradition. Wide emotional range from serene to dramatic."
+    },
+    "electronic": {
+      "similar": ["synthwave", "trap", "drum and bass", "synthpop"],
+      "typical_attributes": {
+        "energy": [0.7, 1.0],
+        "tempo_bpm": [120, 150],
+        "acousticness": [0.0, 0.1],
+        "valence": [0.4, 0.8],
+        "danceability": [0.7, 0.97]
+      },
+      "description": "Broad category of music made primarily with electronic instruments and production. Dance-oriented."
+    },
+    "synthwave": {
+      "similar": ["electronic", "synthpop", "pop"],
+      "typical_attributes": {
+        "energy": [0.6, 0.9],
+        "tempo_bpm": [100, 140],
+        "acousticness": [0.0, 0.15],
+        "valence": [0.35, 0.75],
+        "danceability": [0.6, 0.88]
+      },
+      "description": "Retro-futuristic electronic music inspired by 1980s film scores and video games. Often cinematic and moody."
+    },
+    "drum and bass": {
+      "similar": ["electronic", "metal", "trap"],
+      "typical_attributes": {
+        "energy": [0.85, 1.0],
+        "tempo_bpm": [160, 180],
+        "acousticness": [0.0, 0.08],
+        "valence": [0.3, 0.65],
+        "danceability": [0.7, 0.92]
+      },
+      "description": "Ultra-fast breakbeats with heavy bass lines. Intense, physical, and relentlessly energetic."
+    },
+    "reggae": {
+      "similar": ["afrobeats", "latin", "soul"],
+      "typical_attributes": {
+        "energy": [0.35, 0.65],
+        "tempo_bpm": [75, 100],
+        "acousticness": [0.3, 0.7],
+        "valence": [0.65, 0.92],
+        "danceability": [0.6, 0.85]
+      },
+      "description": "Laid-back Jamaican music with offbeat skank guitar, positive vibes, and deep bass grooves."
+    },
+    "afrobeats": {
+      "similar": ["latin", "reggae", "hip-hop", "soul"],
+      "typical_attributes": {
+        "energy": [0.65, 0.92],
+        "tempo_bpm": [100, 125],
+        "acousticness": [0.05, 0.35],
+        "valence": [0.7, 0.95],
+        "danceability": [0.78, 0.97]
+      },
+      "description": "West African pop and dance music with infectious rhythms, vibrant production, and joyful energy."
+    },
+    "latin": {
+      "similar": ["afrobeats", "reggae", "flamenco", "pop"],
+      "typical_attributes": {
+        "energy": [0.65, 0.95],
+        "tempo_bpm": [105, 135],
+        "acousticness": [0.05, 0.35],
+        "valence": [0.7, 0.95],
+        "danceability": [0.78, 0.97]
+      },
+      "description": "Broad category spanning salsa, cumbia, reggaeton, and more. High energy, danceable, passionate."
+    },
+    "flamenco": {
+      "similar": ["latin", "folk", "blues"],
+      "typical_attributes": {
+        "energy": [0.6, 0.88],
+        "tempo_bpm": [100, 150],
+        "acousticness": [0.25, 0.65],
+        "valence": [0.4, 0.75],
+        "danceability": [0.55, 0.82]
+      },
+      "description": "Spanish Andalusian music with virtuosic guitar, expressive vocals, and intense emotional drama."
+    },
+    "k-pop": {
+      "similar": ["pop", "synthpop", "r&b"],
+      "typical_attributes": {
+        "energy": [0.65, 0.92],
+        "tempo_bpm": [105, 135],
+        "acousticness": [0.0, 0.25],
+        "valence": [0.6, 0.95],
+        "danceability": [0.68, 0.92]
+      },
+      "description": "South Korean pop with meticulous production, synchronized choreography concepts, and addictive hooks."
+    },
+    "bossa nova": {
+      "similar": ["jazz", "lofi", "ambient", "folk"],
+      "typical_attributes": {
+        "energy": [0.2, 0.5],
+        "tempo_bpm": [90, 120],
+        "acousticness": [0.7, 0.97],
+        "valence": [0.55, 0.82],
+        "danceability": [0.45, 0.7]
+      },
+      "description": "Brazilian jazz-samba fusion with gentle nylon-string guitar and breathy vocals. Sophisticated and intimate."
+    },
+    "world": {
+      "similar": ["ambient", "folk", "classical", "afrobeats"],
+      "typical_attributes": {
+        "energy": [0.2, 0.6],
+        "tempo_bpm": [60, 110],
+        "acousticness": [0.5, 0.95],
+        "valence": [0.4, 0.8],
+        "danceability": [0.3, 0.7]
+      },
+      "description": "Global traditional and fusion music outside Western pop categories. Meditative and culturally rich."
+    }
+  }
+}
