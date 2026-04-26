@@ -1,0 +1,144 @@
+{
+  "activities": {
+    "studying": {
+      "keywords": ["study", "studying", "homework", "reading", "learning", "revision", "exam", "focus", "concentrate"],
+      "suggested_attributes": {
+        "energy": [0.2, 0.5],
+        "valence": [0.4, 0.7],
+        "danceability": [0.3, 0.6],
+        "acousticness": [0.5, 1.0],
+        "tempo_bpm": [60, 100]
+      },
+      "preferred_moods": ["chill", "focused", "relaxed"],
+      "preferred_genres": ["lofi", "ambient", "classical", "bossa nova", "jazz"],
+      "avoid_moods": ["intense", "angry", "energetic"],
+      "description": "Low-distraction music that keeps your brain engaged without interrupting concentration."
+    },
+    "working_out": {
+      "keywords": ["gym", "workout", "exercise", "lifting", "running", "training", "cardio", "fitness", "sprint"],
+      "suggested_attributes": {
+        "energy": [0.8, 1.0],
+        "valence": [0.5, 0.95],
+        "danceability": [0.65, 1.0],
+        "acousticness": [0.0, 0.2],
+        "tempo_bpm": [125, 180]
+      },
+      "preferred_moods": ["intense", "energetic", "confident", "angry"],
+      "preferred_genres": ["electronic", "metal", "hip-hop", "drum and bass", "pop", "rock"],
+      "avoid_moods": ["chill", "melancholic", "relaxed"],
+      "description": "High-energy, driving music that pushes you past your limits."
+    },
+    "road_trip": {
+      "keywords": ["road trip", "driving", "highway", "long drive", "car", "road", "cruise"],
+      "suggested_attributes": {
+        "energy": [0.55, 0.85],
+        "valence": [0.55, 0.9],
+        "danceability": [0.5, 0.85],
+        "acousticness": [0.1, 0.6],
+        "tempo_bpm": [95, 135]
+      },
+      "preferred_moods": ["happy", "nostalgic", "confident", "relaxed"],
+      "preferred_genres": ["pop", "rock", "country", "indie pop", "synthwave", "folk"],
+      "avoid_moods": ["melancholic", "angry"],
+      "description": "Feel-good music that makes miles disappear and keeps the energy up on long drives."
+    },
+    "late_night": {
+      "keywords": ["late night", "midnight", "2am", "3am", "night", "can't sleep", "insomnia", "dark", "quiet night"],
+      "suggested_attributes": {
+        "energy": [0.25, 0.65],
+        "valence": [0.3, 0.65],
+        "danceability": [0.35, 0.7],
+        "acousticness": [0.3, 0.85],
+        "tempo_bpm": [60, 110]
+      },
+      "preferred_moods": ["moody", "chill", "melancholic", "focused"],
+      "preferred_genres": ["lofi", "synthwave", "ambient", "trap", "r&b", "jazz"],
+      "avoid_moods": ["happy", "energetic"],
+      "description": "Introspective or hypnotic music suited to the quiet and solitude of late night."
+    },
+    "party": {
+      "keywords": ["party", "dancing", "club", "celebration", "dance", "night out", "pregame", "social"],
+      "suggested_attributes": {
+        "energy": [0.75, 1.0],
+        "valence": [0.65, 1.0],
+        "danceability": [0.78, 1.0],
+        "acousticness": [0.0, 0.15],
+        "tempo_bpm": [110, 150]
+      },
+      "preferred_moods": ["happy", "energetic", "confident"],
+      "preferred_genres": ["electronic", "pop", "latin", "afrobeats", "hip-hop", "k-pop"],
+      "avoid_moods": ["melancholic", "chill", "focused"],
+      "description": "Floor-filling, high-energy music designed to keep people dancing and the atmosphere electric."
+    },
+    "relaxing": {
+      "keywords": ["relax", "relaxing", "chilling", "unwinding", "calm", "rest", "cozy", "lazy", "chill day", "sunday"],
+      "suggested_attributes": {
+        "energy": [0.15, 0.5],
+        "valence": [0.45, 0.85],
+        "danceability": [0.25, 0.6],
+        "acousticness": [0.5, 1.0],
+        "tempo_bpm": [55, 100]
+      },
+      "preferred_moods": ["chill", "relaxed", "happy", "nostalgic"],
+      "preferred_genres": ["lofi", "jazz", "folk", "bossa nova", "indie folk", "ambient", "reggae"],
+      "avoid_moods": ["intense", "angry"],
+      "description": "Soothing music for when you just want to decompress and do nothing in particular."
+    },
+    "heartbreak": {
+      "keywords": ["sad", "heartbreak", "breakup", "crying", "lonely", "missing someone", "grief", "hurt", "pain"],
+      "suggested_attributes": {
+        "energy": [0.15, 0.55],
+        "valence": [0.15, 0.5],
+        "danceability": [0.2, 0.55],
+        "acousticness": [0.5, 1.0],
+        "tempo_bpm": [55, 95]
+      },
+      "preferred_moods": ["melancholic", "romantic", "moody"],
+      "preferred_genres": ["indie folk", "r&b", "blues", "classical", "soul", "folk"],
+      "avoid_moods": ["happy", "energetic", "confident"],
+      "description": "Music that validates and sits with sadness, not trying to fix it."
+    },
+    "morning_routine": {
+      "keywords": ["morning", "waking up", "sunrise", "getting ready", "commute", "start the day", "breakfast"],
+      "suggested_attributes": {
+        "energy": [0.45, 0.8],
+        "valence": [0.6, 0.95],
+        "danceability": [0.5, 0.85],
+        "acousticness": [0.1, 0.55],
+        "tempo_bpm": [90, 130]
+      },
+      "preferred_moods": ["happy", "relaxed", "focused"],
+      "preferred_genres": ["pop", "indie pop", "folk", "jazz", "r&b"],
+      "avoid_moods": ["melancholic", "angry", "intense"],
+      "description": "Energising but not overwhelming music to ease you into the day with a positive mindset."
+    },
+    "creative_work": {
+      "keywords": ["creative", "writing", "drawing", "painting", "designing", "coding", "making", "art", "flow state"],
+      "suggested_attributes": {
+        "energy": [0.3, 0.65],
+        "valence": [0.4, 0.75],
+        "danceability": [0.3, 0.65],
+        "acousticness": [0.3, 0.8],
+        "tempo_bpm": [70, 115]
+      },
+      "preferred_moods": ["focused", "chill", "moody"],
+      "preferred_genres": ["lofi", "jazz fusion", "ambient", "indie folk", "classical", "bossa nova"],
+      "avoid_moods": ["angry", "intense"],
+      "description": "Music that keeps you in flow without grabbing your attention — low-key and mentally stimulating."
+    },
+    "romance": {
+      "keywords": ["date", "romantic", "dinner", "intimate", "love", "candles", "together", "slow dance"],
+      "suggested_attributes": {
+        "energy": [0.3, 0.65],
+        "valence": [0.6, 0.92],
+        "danceability": [0.45, 0.78],
+        "acousticness": [0.3, 0.8],
+        "tempo_bpm": [75, 110]
+      },
+      "preferred_moods": ["romantic", "relaxed", "happy"],
+      "preferred_genres": ["r&b", "soul", "jazz", "bossa nova", "indie pop", "k-pop"],
+      "avoid_moods": ["angry", "intense", "melancholic"],
+      "description": "Warm and intimate music that creates a soft, connective atmosphere."
+    }
+  }
+}
