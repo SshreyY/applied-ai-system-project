@@ -17,3 +17,33 @@ id,title,artist,genre,mood,energy,tempo_bpm,valence,danceability,acousticness
 16,Fracture,Iron Veil,metal,angry,0.97,168,0.22,0.55,0.04
 17,Island Breeze,The Coral Keys,reggae,relaxed,0.53,85,0.83,0.69,0.58
 18,Neon Pulse,Gridwerk,electronic,energetic,0.88,140,0.61,0.91,0.06
+19,Seoul Glow,K-Prism,k-pop,happy,0.85,128,0.88,0.85,0.10
+20,Baile Eterno,Ritmo Libre,latin,energetic,0.87,130,0.90,0.92,0.08
+21,Lagos Sunset,Afro Collective,afrobeats,happy,0.80,112,0.86,0.89,0.14
+22,Midnight Fuse,Jazz Reactor,jazz fusion,focused,0.65,118,0.62,0.70,0.30
+23,Willow Creek,The Drifters,indie folk,nostalgic,0.38,88,0.72,0.48,0.88
+24,3AM Trap,Phantom Grid,trap,moody,0.76,140,0.35,0.82,0.06
+25,Delta Blues,Old Crow,blues,melancholic,0.45,92,0.50,0.55,0.82
+26,Golden Soul,Velvet Brown,soul,romantic,0.58,98,0.82,0.72,0.45
+27,Drum & Rain,Bass Current,drum and bass,intense,0.94,174,0.44,0.86,0.04
+28,Midnight Bossa,Cafe Saudade,bossa nova,relaxed,0.33,110,0.74,0.58,0.87
+29,Cherry Pixels,Neon Echo,synthpop,happy,0.79,122,0.85,0.83,0.12
+30,Firewatch,The Sunfolk,indie folk,melancholic,0.36,84,0.55,0.44,0.90
+31,Hustle Season,Blok Theory,hip-hop,confident,0.82,100,0.70,0.90,0.08
+32,Cloud Temple,Orbit Bloom,ambient,focused,0.24,55,0.58,0.35,0.95
+33,Power Surge,Iron Veil,metal,angry,0.96,172,0.18,0.52,0.03
+34,Cumbia Nights,Ritmo Libre,latin,energetic,0.84,126,0.88,0.94,0.10
+35,After Rain,Paper Lanterns,lofi,melancholic,0.32,70,0.48,0.55,0.83
+36,Voltage,Max Pulse,electronic,energetic,0.91,138,0.65,0.88,0.05
+37,Slow Burn,Luna Sable,r&b,romantic,0.50,94,0.76,0.68,0.42
+38,Gravel Road,Dust & Static,country,nostalgic,0.47,104,0.68,0.58,0.80
+39,Sakura Pop,K-Prism,k-pop,romantic,0.72,118,0.84,0.78,0.18
+40,Afro Space,Afro Collective,afrobeats,energetic,0.83,116,0.80,0.91,0.11
+41,Broken Glass,Voltline,rock,angry,0.89,148,0.32,0.62,0.09
+42,Sunday Morning,Slow Stereo,jazz,relaxed,0.31,82,0.78,0.50,0.91
+43,Deep Current,Bass Current,drum and bass,intense,0.92,170,0.40,0.84,0.05
+44,Neon Carnival,Gridwerk,synthwave,energetic,0.86,132,0.72,0.87,0.07
+45,Healing Raga,Sitar Dreams,world,chill,0.30,72,0.66,0.42,0.88
+46,Flamenco Fire,Ritmo Libre,flamenco,intense,0.79,138,0.58,0.76,0.35
+47,Soft Machine,Jazz Reactor,jazz fusion,focused,0.60,112,0.60,0.65,0.34
+48,Echo Valley,The Drifters,indie folk,chill,0.34,80,0.68,0.46,0.92

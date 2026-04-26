@@ -1,10 +1,10 @@
 # Agent orchestration
 langgraph>=0.2.0
 langchain-core>=0.3.0
-langchain-anthropic>=0.3.0
+langchain-google-genai>=2.0.0
 
 # LLM provider
-anthropic>=0.40.0
+google-generativeai>=0.8.0
 
 # Embeddings + vector store (local, no API key required)
 sentence-transformers>=3.0.0
