@@ -2,11 +2,11 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { UserProfile, FeedbackEntry } from "@/lib/graphql/types";
+import { UserProfile } from "@/lib/graphql/types";
 
 interface Props {
   profile: UserProfile;
-  feedbackEntries: FeedbackEntry[];
+  feedbackCount: number;
   toolsCalled: string[];
   messageCount: number;
   onNewSession: () => void;
@@ -31,7 +31,7 @@ function StatBar({ label, value }: { label: string; value: number }) {
 
 export function ProfileSidebar({
   profile,
-  feedbackEntries,
+  feedbackCount,
   toolsCalled,
   messageCount,
   onNewSession,
@@ -103,7 +103,7 @@ export function ProfileSidebar({
             <div className="text-muted-foreground">Messages</div>
           </div>
           <div className="rounded-md bg-muted/50 p-2 text-center">
-            <div className="text-lg font-bold">{feedbackEntries.length}</div>
+            <div className="text-lg font-bold">{feedbackCount}</div>
             <div className="text-muted-foreground">Ratings</div>
           </div>
         </div>
