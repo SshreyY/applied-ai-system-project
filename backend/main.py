@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
 
 
 from backend.schema import schema
+from backend.streaming import router as stream_router
 
 graphql_router = GraphQLRouter(schema)
 
@@ -64,6 +65,7 @@ app.add_middleware(
 )
 
 app.include_router(graphql_router, prefix="/graphql")
+app.include_router(stream_router)
 
 
 @app.get("/health")

@@ -32,17 +32,65 @@ def _route_intent(state: AgentState) -> str:
 
 
 def _finalize_response(state: AgentState) -> AgentState:
-    """Append a human-readable assistant message after recommendations are finalized."""
+    """Use the LLM to write a natural conversational reply that includes the recommendations."""
+    from langchain_groq import ChatGroq
+    from langchain_core.messages import SystemMessage, HumanMessage
     from backend.state import ConversationMessage
+    import os
+    import json
+
     recs = state.final_recommendations
-    if recs:
-        count = len(recs)
-        top = recs[0]
-        names = ", ".join(f"**{r.title}** by {r.artist}" for r in recs[:2])
-        tail = f" and {count - 2} more" if count > 2 else ""
-        msg = f"Here are {count} picks that match your vibe: {names}{tail}. Let me know what you think!"
-    else:
-        msg = "I couldn't find songs that match right now — try describing your mood or activity differently!"
+    user_request = next(
+        (m.content for m in reversed(state.messages) if m.role == "user"), ""
+    )
+
+    if not recs:
+        state.messages.append(ConversationMessage(
+            role="assistant",
+            content="I couldn't find songs matching your vibe right now — try describing your mood, activity, or a genre you enjoy!",
+        ))
+        return state
+
+    recs_summary = [
+        {
+            "title": r.title,
+            "artist": r.artist,
+            "genre": r.genre,
+            "mood": r.mood,
+            "energy": r.energy,
+            "explanation": r.explanation,
+        }
+        for r in recs[:5]
+    ]
+
+    try:
+        llm = ChatGroq(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            api_key=os.getenv("GROQ_API_KEY"),
+            temperature=0.7,
+        )
+        response = llm.invoke([
+            SystemMessage(content=(
+                "You are VibeFinder, a friendly music recommendation assistant. "
+                "The user just asked for songs and you found great matches. "
+                "Write a warm, conversational 2-3 sentence reply that:\n"
+                "- Directly responds to what the user said (don't start with 'Here are')\n"
+                "- Naturally mentions the top 1-2 song titles and why they fit\n"
+                "- Ends with a short invite for feedback (e.g. 'Let me know if you want more like these!')\n"
+                "Keep it under 60 words. Sound like a knowledgeable friend, not a list-maker."
+            )),
+            HumanMessage(content=(
+                f"User said: \"{user_request}\"\n\n"
+                f"Songs found:\n{json.dumps(recs_summary, indent=2)}"
+            )),
+        ])
+        msg = response.content.strip()
+    except Exception as e:
+        logger.error(f"[finalize_response] LLM error: {e}")
+        # Graceful fallback
+        names = " and ".join(f"{r.title} by {r.artist}" for r in recs[:2])
+        msg = f"I found {len(recs)} tracks that fit — starting with {names}. Let me know what you think!"
+
     state.messages.append(ConversationMessage(role="assistant", content=msg))
     return state
 
