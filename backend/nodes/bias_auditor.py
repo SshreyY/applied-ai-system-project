@@ -23,32 +23,20 @@ def _get_llm() -> ChatGroq:
     global _llm
     if _llm is None:
         _llm = ChatGroq(
-            model="llama-3.1-8b-instant",
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             api_key=os.getenv("GROQ_API_KEY"),
             temperature=0,
         )
     return _llm
 
 
-SYSTEM_PROMPT = """You are a bias auditor for a music recommendation system.
-
-Review the proposed recommendations for these known bias patterns:
-
-1. GENRE LOCK-IN: Are 4+ out of 5 songs from the same genre? (bad if user didn't specifically ask for one genre)
-2. MOOD HOMOGENEITY: Do all songs share the same mood with no variety?
-3. ENERGY CLUSTERING: Is the energy range less than 0.15 across all songs? (too samey)
-4. CONFIDENCE TOO LOW: Are any recommendations below 0.4 confidence with no caveat in the explanation?
-5. IGNORED EXCLUSIONS: Do any recommended songs appear in the excluded_ids list?
-6. CATALOG BLINDNESS: For a 48-song catalog, did the agent only look at 5 or fewer songs before deciding?
+SYSTEM_PROMPT = """You are a bias auditor for a music recommender. Check for:
+1. Genre lock-in: 4+ of 5 songs same genre (unless user asked for one genre)
+2. All songs same mood with zero variety
+3. Any recommended song in the excluded_ids list
 
 Return ONLY valid JSON:
-{
-  "passed": true/false,
-  "issues": ["specific issue description if any"],
-  "suggestions": ["specific fix suggestion if any"]
-}
-
-If no issues found, return {"passed": true, "issues": [], "suggestions": []}"""
+{"passed": true/false, "issues": ["..."], "suggestions": ["..."]}"""
 
 
 def bias_auditor_node(state: AgentState) -> AgentState:
@@ -88,8 +76,8 @@ def bias_auditor_node(state: AgentState) -> AgentState:
 
     try:
         llm = _get_llm()
-        cb = get_callback_handler(state.session_id, "bias_auditor")
-        kwargs = {"config": {"callbacks": [cb]}} if cb else {}
+        cb, lf_meta = get_callback_handler(state.session_id, "bias_auditor")
+        kwargs = {"config": {"callbacks": [cb], "metadata": lf_meta, "run_name": "bias_auditor"}} if cb else {}
         response = llm.invoke([
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=json.dumps(audit_input, indent=2)),
@@ -110,8 +98,8 @@ def bias_auditor_node(state: AgentState) -> AgentState:
         logger.info(f"[bias_auditor] passed={audit.passed} issues={audit.issues}")
         state.bias_audit = audit
 
-        if audit.passed:
-            state.final_recommendations = candidates
+        # Always populate final_recommendations — the graph reads this at END
+        state.final_recommendations = candidates
 
     except Exception as e:
         logger.error(f"[bias_auditor] error: {e}")
@@ -129,14 +117,14 @@ def should_rerank(state: AgentState) -> str:
     """
     Conditional edge function for LangGraph.
     Only allows one re-rank attempt to prevent infinite loops.
+    State mutations here are NOT persisted by LangGraph — only return the routing string.
     """
     if state.bias_audit is None or state.bias_audit.passed:
         return "finalize"
 
-    # Force finalize if we've already re-ranked once, have no candidates, or hit tool limit
+    # Force finalize after one re-rank attempt, no candidates, or too many tool calls
     if state.rerank_count >= 1 or not state.candidate_songs or len(state.tool_calls_made) > 10:
         logger.warning("[bias_auditor] forcing finalize to prevent loop")
-        state.final_recommendations = state.candidate_songs
         return "finalize"
 
     state.rerank_count += 1

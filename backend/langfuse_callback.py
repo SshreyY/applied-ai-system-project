@@ -1,114 +1,119 @@
 """
-Langfuse instrumentation helper for VibeFinder Agent.
+Langfuse instrumentation for VibeFinder Agent (v4 SDK).
 
-Provides a shared CallbackHandler and trace/span helpers used by every
-node and tool in the graph. All LLM calls and tool invocations are
-automatically logged as spans inside a parent trace per session turn.
+Pattern per the v4 docs:
+  - get_client()      → singleton client, reads env vars automatically
+  - CallbackHandler() → zero-arg constructor; session_id set via metadata at invocation
+
+Required env vars (.env):
+  LANGFUSE_PUBLIC_KEY
+  LANGFUSE_SECRET_KEY
+  LANGFUSE_BASE_URL   (e.g. https://us.cloud.langfuse.com)
 """
 
-import os
 import logging
-from functools import lru_cache
+import os
 
 logger = logging.getLogger(__name__)
 
-_langfuse_enabled = False
-_langfuse_client = None
+_client = None
 
 
-def _init():
-    global _langfuse_enabled, _langfuse_client
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
-    host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+def _get_client():
+    """Lazy init — checked on every call so hot-reloads and delayed load_dotenv() work."""
+    global _client
+    if _client is not None:
+        return _client
 
-    if not public_key or not secret_key or public_key.startswith("pk-lf-..."):
-        logger.info("[langfuse] No valid keys found — tracing disabled.")
-        return
+    pub = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    sec = os.getenv("LANGFUSE_SECRET_KEY", "")
+    if not pub or not sec or pub == "pk-lf-..." or sec == "sk-lf-...":
+        return None
 
     try:
-        from langfuse import Langfuse
-        _langfuse_client = Langfuse(
-            public_key=public_key,
-            secret_key=secret_key,
-            host=host,
+        from langfuse import get_client
+        _client = get_client()
+        logger.info(
+            "[langfuse] Tracing enabled → %s",
+            os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
         )
-        _langfuse_enabled = True
-        logger.info("[langfuse] Tracing enabled.")
-    except ImportError:
-        logger.warning("[langfuse] langfuse package not installed — tracing disabled.")
-    except Exception as e:
-        logger.warning(f"[langfuse] Init failed (non-fatal): {e}")
+    except Exception as exc:
+        logger.warning("[langfuse] Init failed (non-fatal): %s", exc)
+
+    return _client
 
 
-_init()
-
+# ── LangChain / LangGraph callback ───────────────────────────────────────────
 
 def get_callback_handler(session_id: str, trace_name: str = "vibefinder-turn"):
     """
-    Returns a Langfuse CallbackHandler for LangChain/LangGraph LLM calls.
-    Returns None if Langfuse is not configured.
+    Return (handler, metadata) for use in LangChain config:
+        config={"callbacks": [handler], "metadata": metadata, "run_name": trace_name}
+
+    In Langfuse v4 the CallbackHandler takes NO constructor args.
+    session_id is attached via metadata["langfuse_session_id"] at invocation time.
+    Returns (None, {}) when Langfuse is not configured.
     """
-    if not _langfuse_enabled:
-        return None
+    if _get_client() is None:
+        return None, {}
     try:
-        from langfuse.callback import CallbackHandler
-        return CallbackHandler(
-            public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-            secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
-            session_id=session_id,
-            trace_name=trace_name,
-        )
-    except Exception as e:
-        logger.warning(f"[langfuse] CallbackHandler error: {e}")
-        return None
+        from langfuse.langchain import CallbackHandler
+        handler = CallbackHandler()
+        metadata = {
+            "langfuse_session_id": session_id,
+            "langfuse_tags": ["vibefinder", trace_name],
+        }
+        return handler, metadata
+    except Exception as exc:
+        logger.warning("[langfuse] CallbackHandler error: %s", exc)
+        return None, {}
 
 
-def log_score(trace_id: str, name: str, value: float, comment: str = "") -> None:
-    """Log an eval score to a Langfuse trace (e.g. recommendation relevance)."""
-    if not _langfuse_enabled or not _langfuse_client:
-        return
-    try:
-        _langfuse_client.score(
-            trace_id=trace_id,
-            name=name,
-            value=value,
-            comment=comment,
-        )
-    except Exception as e:
-        logger.warning(f"[langfuse] score error: {e}")
-
+# ── Score helpers ─────────────────────────────────────────────────────────────
 
 def log_feedback_score(session_id: str, song_id: int, rating: str) -> None:
     """
-    Log user feedback as a Langfuse score on the most recent trace for this session.
-    rating: 'liked' -> 1.0, 'disliked' -> 0.0, 'more_like_this' -> 0.8, 'less_like_this' -> 0.2
+    Log user feedback as a numeric Langfuse score on the session.
+
+    Mapping: liked=1.0  more_like_this=0.8  less_like_this=0.2  disliked=0.0
     """
-    if not _langfuse_enabled or not _langfuse_client:
+    client = _get_client()
+    if client is None:
         return
-    score_map = {
-        "liked": 1.0,
-        "disliked": 0.0,
-        "more_like_this": 0.8,
-        "less_like_this": 0.2,
-    }
+    score_map = {"liked": 1.0, "more_like_this": 0.8, "less_like_this": 0.2, "disliked": 0.0}
     value = score_map.get(rating, 0.5)
     try:
-        _langfuse_client.score(
+        client.create_score(
             name="user_feedback",
             value=value,
             comment=f"song_id={song_id} rating={rating}",
             session_id=session_id,
         )
-    except Exception as e:
-        logger.warning(f"[langfuse] feedback score error: {e}")
+    except Exception as exc:
+        logger.warning("[langfuse] create_score error: %s", exc)
+
+
+def log_score(trace_id: str, name: str, value: float, comment: str = "") -> None:
+    """Log an eval score (e.g. genre_relevance) to a specific trace."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        client.create_score(
+            trace_id=trace_id,
+            name=name,
+            value=value,
+            comment=comment,
+        )
+    except Exception as exc:
+        logger.warning("[langfuse] create_score error: %s", exc)
 
 
 def flush() -> None:
-    """Flush pending Langfuse events (call at app shutdown)."""
-    if _langfuse_enabled and _langfuse_client:
+    """Flush pending events at shutdown — prevents traces being dropped."""
+    client = _get_client()
+    if client is not None:
         try:
-            _langfuse_client.flush()
+            client.flush()
         except Exception:
             pass

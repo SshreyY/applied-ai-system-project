@@ -20,7 +20,7 @@ def _get_llm() -> ChatGroq:
     global _llm
     if _llm is None:
         _llm = ChatGroq(
-            model="llama-3.1-8b-instant",
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             api_key=os.getenv("GROQ_API_KEY"),
             temperature=0,
         )
@@ -51,8 +51,8 @@ def router_node(state: AgentState) -> AgentState:
 
     try:
         llm = _get_llm()
-        cb = get_callback_handler(state.session_id, "router")
-        kwargs = {"config": {"callbacks": [cb]}} if cb else {}
+        cb, lf_meta = get_callback_handler(state.session_id, "router")
+        kwargs = {"config": {"callbacks": [cb], "metadata": lf_meta, "run_name": "router"}} if cb else {}
         response = llm.invoke([
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=latest.content),

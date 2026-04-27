@@ -20,6 +20,11 @@ import streamlit as st
 from backend.graph import compiled_graph
 from backend.state import AgentState, ConversationMessage
 from backend.session import create_session, get_session, update_session
+from backend.langfuse_callback import flush as langfuse_flush
+
+# Flush Langfuse traces when the Streamlit session ends
+import atexit
+atexit.register(langfuse_flush)
 
 st.set_page_config(page_title="VibeFinder Agent — Dev Console", page_icon="🎵", layout="wide")
 st.title("🎵 VibeFinder Agent — Backend Dev Console")
@@ -64,6 +69,7 @@ with chat_col:
     if recs:
         st.subheader("Recommendations")
         for i, rec in enumerate(recs, 1):
+            song_id = rec.get("id", i)
             with st.expander(f"#{i} {rec['title']} by {rec['artist']} — {rec['confidence']*100:.0f}% match"):
                 cols = st.columns(3)
                 cols[0].metric("Genre", rec["genre"])
@@ -72,6 +78,46 @@ with chat_col:
                 st.write(f"**Why:** {rec['explanation']}")
                 if rec.get("v1_score") is not None:
                     st.caption(f"V1 score: {rec['v1_score']:.2f} / 7.5")
+
+                # Feedback buttons
+                fb_cols = st.columns(4)
+                feedback_map = {
+                    "👍 Liked": "liked",
+                    "👎 Disliked": "disliked",
+                    "➕ More like this": "more_like_this",
+                    "➖ Less like this": "less_like_this",
+                }
+                for col, (label, rating) in zip(fb_cols, feedback_map.items()):
+                    btn_key = f"fb_{song_id}_{rating}_{i}"
+                    if col.button(label, key=btn_key):
+                        # Record feedback directly into session state
+                        existing = get_session(st.session_state.session_id) or {}
+                        entries = existing.get("feedback_entries", [])
+                        entries.append({
+                            "song_id": song_id,
+                            "rating": rating,
+                            "comment": f"Button: {label}",
+                        })
+                        # Update profile: liked → add to liked_ids, disliked → exclude
+                        profile = existing.get("user_profile", {})
+                        if rating in ("liked", "more_like_this"):
+                            liked = profile.get("liked_song_ids", [])
+                            if song_id not in liked:
+                                liked.append(song_id)
+                            profile["liked_song_ids"] = liked
+                        elif rating in ("disliked", "less_like_this"):
+                            excluded = profile.get("excluded_song_ids", [])
+                            if song_id not in excluded:
+                                excluded.append(song_id)
+                            profile["excluded_song_ids"] = excluded
+                        existing["feedback_entries"] = entries
+                        existing["user_profile"] = profile
+                        update_session(st.session_state.session_id, existing)
+                        # Log to Langfuse
+                        from backend.langfuse_callback import log_feedback_score
+                        log_feedback_score(st.session_state.session_id, song_id, rating)
+                        st.toast(f"{label} recorded for **{rec['title']}**")
+                        st.rerun()
 
         audit = state.get("bias_audit") or {}
         if isinstance(audit, dict) and audit.get("issues"):
@@ -96,58 +142,56 @@ with chat_col:
             final_state = None
 
             try:
-                for node_name, node_output in compiled_graph.stream(
+                for chunk in compiled_graph.stream(
                     agent_state.model_dump(),
                     config={"recursion_limit": 25},
                     stream_mode="updates",
                 ):
-                    icon, label = NODE_LABELS.get(node_name, ("⚙️", node_name))
+                    for node_name, node_output in chunk.items():
+                        icon, label = NODE_LABELS.get(node_name, ("⚙️", node_name))
+                        details = []
 
-                    # Pull useful info out of the node output to display
-                    details = []
+                        intent = node_output.get("intent")
+                        if intent:
+                            details.append(f"Intent: **{intent}**")
 
-                    intent = node_output.get("intent")
-                    if intent:
-                        details.append(f"Intent: **{intent}**")
+                        profile = node_output.get("user_profile", {})
+                        if profile:
+                            profile_bits = [
+                                f"{k}={v}" for k, v in profile.items()
+                                if v is not None and v != [] and k not in ("excluded_song_ids", "liked_song_ids")
+                            ]
+                            if profile_bits:
+                                details.append("Profile: " + ", ".join(profile_bits))
 
-                    profile = node_output.get("user_profile", {})
-                    if profile:
-                        profile_bits = [
-                            f"{k}={v}" for k, v in profile.items()
-                            if v is not None and v != [] and k not in ("excluded_song_ids", "liked_song_ids")
-                        ]
-                        if profile_bits:
-                            details.append("Profile: " + ", ".join(profile_bits))
+                        tools = node_output.get("tool_calls_made")
+                        if tools:
+                            details.append("Tools called: " + ", ".join(f"`{t}`" for t in tools))
 
-                    tools = node_output.get("tool_calls_made")
-                    if tools:
-                        details.append("Tools called: " + ", ".join(f"`{t}`" for t in tools))
+                        candidates = node_output.get("candidate_songs") or []
+                        if candidates:
+                            details.append(f"Candidates found: **{len(candidates)}** songs")
 
-                    candidates = node_output.get("candidate_songs") or []
-                    if candidates:
-                        details.append(f"Candidates found: **{len(candidates)}** songs")
+                        audit = node_output.get("bias_audit") or {}
+                        if isinstance(audit, dict):
+                            if audit.get("passed") is True:
+                                details.append("✅ Bias audit: **passed**")
+                            elif audit.get("passed") is False:
+                                issues = audit.get("issues", [])
+                                details.append(f"⚠️ Bias audit: **{len(issues)} issue(s)** — " + "; ".join(issues[:2]))
 
-                    audit = node_output.get("bias_audit") or {}
-                    if isinstance(audit, dict):
-                        if audit.get("passed") is True:
-                            details.append("✅ Bias audit: **passed**")
-                        elif audit.get("passed") is False:
-                            issues = audit.get("issues", [])
-                            details.append(f"⚠️ Bias audit: **{len(issues)} issue(s)** — " + "; ".join(issues[:2]))
+                        final_recs = node_output.get("final_recommendations") or []
+                        if final_recs:
+                            details.append(f"Final recommendations: **{len(final_recs)}** songs")
 
-                    final_recs = node_output.get("final_recommendations") or []
-                    if final_recs:
-                        details.append(f"Final recommendations: **{len(final_recs)}** songs")
+                        error = node_output.get("error")
+                        if error:
+                            details.append(f"❌ Error: {error}")
 
-                    error = node_output.get("error")
-                    if error:
-                        details.append(f"❌ Error: {error}")
+                        detail_str = "\n\n".join(details) if details else ""
+                        st.write(f"{icon} **{label}**" + (f"\n\n{detail_str}" if detail_str else ""))
 
-                    detail_str = "\n\n".join(details) if details else ""
-                    st.write(f"{icon} **{label}**" + (f"\n\n{detail_str}" if detail_str else ""))
-
-                    # Keep track of the latest full state
-                    final_state = node_output
+                        final_state = node_output
 
                 status.update(label="✅ Done", state="complete", expanded=False)
 

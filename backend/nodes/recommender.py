@@ -1,93 +1,51 @@
 """
-Recommender node -- the core ReAct tool-calling loop.
+Recommender node.
 
-The LLM reasons about the user profile, decides which tools to call and in
-what order, iterates until it has a good set of candidates, then formats
-final recommendations with explanations and confidence scores.
+Tools are called directly (no LLM tool-calling API) to avoid Groq's
+tool_use_failed errors. The LLM's only job is formatting the final JSON.
 """
 
 import json
 import logging
 import os
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from backend.state import AgentState, SongRecommendation
 from backend.langfuse_callback import get_callback_handler
 from backend.tools.catalog_search import catalog_search
 from backend.tools.vibe_search import vibe_search
-from backend.tools.genre_knowledge import lookup_genre_info
-from backend.tools.activity_context import lookup_activity_context
-from backend.tools.classic_scorer import score_song_classic
 from backend.tools.diversity_check import check_diversity
-from backend.tools.conflict_detector import detect_preference_conflicts
 
 logger = logging.getLogger(__name__)
 
-TOOLS = [
-    catalog_search,
-    vibe_search,
-    lookup_genre_info,
-    lookup_activity_context,
-    score_song_classic,
-    check_diversity,
-    detect_preference_conflicts,
-]
+_llm: ChatGroq | None = None
 
-_llm_with_tools: ChatGroq | None = None
+FORMAT_PROMPT = (
+    "You are a music recommendation engine. "
+    "Given the candidate songs below, select the best 3-5 for the user and return ONLY valid JSON — "
+    "no markdown, no explanation outside the JSON:\n"
+    '{"recommendations": ['
+    '{"id": <int>, "title": <str>, "artist": <str>, "genre": <str>, "mood": <str>, '
+    '"energy": <float>, "valence": <float>, "danceability": <float>, "acousticness": <float>, '
+    '"score": <float 0-1>, "confidence": <float 0-1>, "explanation": <str>, "v1_score": null}'
+    "]}"
+)
 
 
 def _get_llm() -> ChatGroq:
-    global _llm_with_tools
-    if _llm_with_tools is None:
-        llm = ChatGroq(
-            model="llama-3.1-8b-instant",
+    global _llm
+    if _llm is None:
+        _llm = ChatGroq(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             api_key=os.getenv("GROQ_API_KEY"),
-            temperature=0.3,
+            temperature=0,
         )
-        _llm_with_tools = llm.bind_tools(TOOLS)
-    return _llm_with_tools
-
-
-SYSTEM_PROMPT = """You are VibeFinder, an expert music recommendation agent.
-
-You have access to these tools:
-- catalog_search: filter songs by genre, mood, energy ranges
-- vibe_search: semantic search using natural language descriptions
-- lookup_genre_info: find similar genres and typical audio attributes
-- lookup_activity_context: map activities/situations to music attributes
-- score_song_classic: run the V1 formula for baseline comparison
-- check_diversity: analyze candidate diversity (genre lock-in, energy spread)
-- detect_preference_conflicts: flag contradictory preferences before searching
-
-Your process:
-1. Look at the user profile and conversation history
-2. If there's an activity described, call lookup_activity_context first
-3. If genre is mentioned, call lookup_genre_info to find similar genres too
-4. Call catalog_search and/or vibe_search to get candidates
-5. Call check_diversity on your candidates — if diversity is low, broaden your search
-6. Optionally call score_song_classic to get a V1 baseline for comparison
-7. Select the top 3-5 songs and assign each a confidence score (0.0-1.0)
-8. Return your final recommendations as a JSON array
-
-For each recommended song include:
-- id, title, artist, genre, mood, energy, valence, danceability, acousticness
-- score (your overall match score, 0-10)
-- confidence (0.0-1.0, how confident you are this fits the user)
-- explanation (1-2 sentences why this song fits)
-- v1_score (from classic_scorer if you called it, otherwise null)
-
-If confidence is below 0.5, note it in the explanation.
-
-Return your final answer as JSON:
-{"recommendations": [...]}
-
-The catalog has 48 songs. Song IDs are integers 1-48."""
+    return _llm
 
 
 def recommender_node(state: AgentState) -> AgentState:
-    """Run the ReAct tool-calling loop and populate state.candidate_songs."""
+    """Call search tools directly, then ask the LLM to format results."""
     profile = state.user_profile
-    conversation = state.messages
 
     profile_summary = {
         k: v for k, v in {
@@ -104,62 +62,68 @@ def recommender_node(state: AgentState) -> AgentState:
     }
 
     user_request = next(
-        (m.content for m in reversed(conversation) if m.role == "user"), ""
+        (m.content for m in reversed(state.messages) if m.role == "user"), ""
     )
 
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=(
-            f"User request: {user_request}\n\n"
-            f"Current user profile: {json.dumps(profile_summary)}\n\n"
-            "Please recommend songs using the tools available."
-        )),
-    ]
-
-    tool_map = {t.name: t for t in TOOLS}
-    tools_called = []
-    max_iterations = 8
+    tools_called: list[str] = []
+    candidates: list[dict] = []
 
     try:
-        llm = _get_llm()
-        cb = get_callback_handler(state.session_id, "recommender")
-        invoke_kwargs = {"config": {"callbacks": [cb]}} if cb else {}
+        # --- Step 1: catalog search using structured profile fields ---
+        catalog_args: dict = {}
+        if profile.genre:
+            catalog_args["genre"] = profile.genre
+        if profile.mood:
+            catalog_args["mood"] = profile.mood
+        if profile.energy is not None:
+            catalog_args["min_energy"] = max(0.0, profile.energy - 0.2)
+            catalog_args["max_energy"] = min(1.0, profile.energy + 0.2)
 
-        for iteration in range(max_iterations):
-            response = llm.invoke(messages, **invoke_kwargs)
-            messages.append(response)
+        logger.info(f"[recommender] catalog_search args={catalog_args}")
+        catalog_result = catalog_search.invoke(catalog_args)
+        tools_called.append("catalog_search")
+        if isinstance(catalog_result, dict) and "songs" in catalog_result:
+            candidates.extend(catalog_result["songs"])
 
-            if not response.tool_calls:
-                # LLM is done with tool calls — extract final recommendations
-                break
+        # --- Step 2: semantic vibe search using the raw user request ---
+        vibe_query = user_request or " ".join(
+            str(v) for v in [profile.genre, profile.mood, profile.activity] if v
+        )
+        logger.info(f"[recommender] vibe_search query={vibe_query!r}")
+        vibe_result = vibe_search.invoke({"query": vibe_query, "n_results": 8})
+        tools_called.append("vibe_search")
+        if isinstance(vibe_result, dict) and "songs" in vibe_result:
+            existing_ids = {s.get("id") for s in candidates}
+            for song in vibe_result["songs"]:
+                if song.get("id") not in existing_ids:
+                    candidates.append(song)
+                    existing_ids.add(song.get("id"))
 
-            for tc in response.tool_calls:
-                tool_name = tc["name"]
-                tool_args = tc["args"]
-                tools_called.append(tool_name)
-                logger.info(f"[recommender] tool_call={tool_name} args={tool_args}")
-
-                tool_fn = tool_map.get(tool_name)
-                if tool_fn is None:
-                    tool_result = {"error": f"Unknown tool: {tool_name}"}
-                else:
-                    try:
-                        tool_result = tool_fn.invoke(tool_args)
-                    except Exception as e:
-                        logger.warning(f"[recommender] tool {tool_name} error: {e}")
-                        tool_result = {"error": str(e)}
-
-                messages.append(ToolMessage(
-                    content=json.dumps(tool_result),
-                    tool_call_id=tc["id"],
-                ))
+        # --- Step 3: diversity check ---
+        if candidates:
+            logger.info(f"[recommender] check_diversity on {len(candidates)} candidates")
+            diversity_result = check_diversity.invoke({"songs": candidates})
+            tools_called.append("check_diversity")
+            logger.info(f"[recommender] diversity={diversity_result}")
 
         state.tool_calls_made = tools_called
+        logger.info(f"[recommender] {len(candidates)} candidates before LLM formatting")
 
-        # Parse final JSON recommendations from last AI message
-        final_content = response.content or ""
-        recommendations = _parse_recommendations(final_content)
-        state.candidate_songs = recommendations
+        # --- Step 4: LLM formats the final top picks (no tools bound) ---
+        cb, lf_meta = get_callback_handler(state.session_id, "recommender")
+        invoke_kwargs = {"config": {"callbacks": [cb], "metadata": lf_meta, "run_name": "recommender"}} if cb else {}
+
+        format_messages = [
+            SystemMessage(content=FORMAT_PROMPT),
+            HumanMessage(content=(
+                f"User profile: {json.dumps(profile_summary)}\n"
+                f"User request: {user_request}\n\n"
+                f"Candidate songs ({len(candidates)} total):\n"
+                f"{json.dumps(candidates, indent=2)}"
+            )),
+        ]
+        response = _get_llm().invoke(format_messages, **invoke_kwargs)
+        state.candidate_songs = _parse_recommendations(response.content or "")
 
     except Exception as e:
         logger.error(f"[recommender] error: {e}")
