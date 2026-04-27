@@ -10,6 +10,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.state import AgentState, UserProfile
 from backend.langfuse_callback import get_callback_handler
+from backend.tools.conflict_detector import detect_preference_conflicts
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,29 @@ def profile_builder_node(state: AgentState) -> AgentState:
             profile.activity = extracted["activity"].lower().strip()
 
         state.user_profile = profile
+
+        # --- Conflict detection ---
+        # Check for contradictory preferences (e.g. high energy + chill mood)
+        # before hitting the recommender so we can surface the issue to the user.
+        try:
+            conflict_result = detect_preference_conflicts.invoke({
+                "genre": profile.genre,
+                "mood": profile.mood,
+                "energy": profile.energy,
+                "valence": profile.valence,
+                "danceability": profile.danceability,
+                "acousticness": profile.acousticness,
+            })
+            if conflict_result.get("has_conflicts"):
+                state.conflict_detected = True
+                questions = conflict_result.get("clarification_questions", [])
+                state.conflict_description = questions[0] if questions else "Conflicting preferences detected."
+                logger.info(f"[profile_builder] conflicts detected: {conflict_result['conflicts']}")
+            else:
+                state.conflict_detected = False
+                state.conflict_description = None
+        except Exception as e:
+            logger.warning(f"[profile_builder] conflict detection failed (non-fatal): {e}")
 
     except json.JSONDecodeError as e:
         logger.warning(f"[profile_builder] JSON parse error: {e} -- raw: {response.content[:200]}")

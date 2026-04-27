@@ -16,6 +16,9 @@ from backend.langfuse_callback import get_callback_handler
 from backend.tools.catalog_search import catalog_search
 from backend.tools.vibe_search import vibe_search
 from backend.tools.diversity_check import check_diversity
+from backend.tools.genre_knowledge import lookup_genre_info
+from backend.tools.activity_context import lookup_activity_context
+from backend.tools.classic_scorer import score_song_classic
 
 logger = logging.getLogger(__name__)
 
@@ -122,13 +125,82 @@ def recommender_node(state: AgentState) -> AgentState:
     candidates: list[dict] = []
 
     try:
-        # --- Step 1: catalog search using structured profile fields ---
         catalog_args: dict = {}
+
+        # --- Step 0a: Genre knowledge expansion ---
+        # Use similar_genres and typical_attributes to widen the search
+        # beyond exact genre matching (fixes V1's binary genre lock-in).
+        if profile.genre:
+            try:
+                genre_info = lookup_genre_info.invoke({"genre": profile.genre})
+                tools_called.append("lookup_genre_info")
+                logger.info(f"[recommender] lookup_genre_info={genre_info}")
+                if not genre_info.get("not_found"):
+                    # Refine energy range from genre's typical attributes
+                    # if the user didn't specify energy directly
+                    if profile.energy is None:
+                        attrs = genre_info.get("typical_attributes", {})
+                        e = attrs.get("energy")
+                        if isinstance(e, dict):
+                            catalog_args["min_energy"] = e.get("min", 0.0)
+                            catalog_args["max_energy"] = e.get("max", 1.0)
+                        elif isinstance(e, list) and len(e) == 2:
+                            catalog_args["min_energy"] = float(e[0])
+                            catalog_args["max_energy"] = float(e[1])
+
+                    # Search similar genres for additional candidates
+                    for sim_genre in genre_info.get("similar_genres", [])[:2]:
+                        sim_result = catalog_search.invoke({"genre": sim_genre})
+                        if isinstance(sim_result, dict) and "songs" in sim_result:
+                            existing_ids = {s.get("id") for s in candidates}
+                            for song in sim_result["songs"]:
+                                if song.get("id") not in existing_ids:
+                                    candidates.append(song)
+                                    existing_ids.add(song.get("id"))
+            except Exception as e:
+                logger.warning(f"[recommender] lookup_genre_info failed (non-fatal): {e}")
+
+        # --- Step 0b: Activity context mapping ---
+        # Map activity description → suggested audio attributes + preferred genres
+        # (fixes V1's cold-start problem for activity-based requests).
+        if profile.activity:
+            try:
+                activity_info = lookup_activity_context.invoke({"activity": profile.activity})
+                tools_called.append("lookup_activity_context")
+                logger.info(f"[recommender] lookup_activity_context={activity_info}")
+                if not activity_info.get("not_found"):
+                    attrs = activity_info.get("suggested_attributes", {})
+                    # Fill in energy from activity if not set by profile
+                    if profile.energy is None and "energy" in attrs:
+                        e = attrs["energy"]
+                        if isinstance(e, dict):
+                            mid = (e.get("min", 0.3) + e.get("max", 0.7)) / 2
+                            catalog_args.setdefault("min_energy", e.get("min", 0.0))
+                            catalog_args.setdefault("max_energy", e.get("max", 1.0))
+                            profile.energy = round(mid, 2)
+                        elif isinstance(e, list) and len(e) == 2:
+                            catalog_args.setdefault("min_energy", float(e[0]))
+                            catalog_args.setdefault("max_energy", float(e[1]))
+                            profile.energy = round((e[0] + e[1]) / 2, 2)
+
+                    # Search preferred genres from activity
+                    for pg in activity_info.get("preferred_genres", [])[:2]:
+                        pg_result = catalog_search.invoke({"genre": pg})
+                        if isinstance(pg_result, dict) and "songs" in pg_result:
+                            existing_ids = {s.get("id") for s in candidates}
+                            for song in pg_result["songs"]:
+                                if song.get("id") not in existing_ids:
+                                    candidates.append(song)
+                                    existing_ids.add(song.get("id"))
+            except Exception as e:
+                logger.warning(f"[recommender] lookup_activity_context failed (non-fatal): {e}")
+
+        # --- Step 1: catalog search using structured profile fields ---
         if profile.genre:
             catalog_args["genre"] = profile.genre
         if profile.mood:
             catalog_args["mood"] = profile.mood
-        if profile.energy is not None:
+        if profile.energy is not None and "min_energy" not in catalog_args:
             catalog_args["min_energy"] = max(0.0, profile.energy - 0.2)
             catalog_args["max_energy"] = min(1.0, profile.energy + 0.2)
 
@@ -136,7 +208,11 @@ def recommender_node(state: AgentState) -> AgentState:
         catalog_result = catalog_search.invoke(catalog_args)
         tools_called.append("catalog_search")
         if isinstance(catalog_result, dict) and "songs" in catalog_result:
-            candidates.extend(catalog_result["songs"])
+            existing_ids = {s.get("id") for s in candidates}
+            for song in catalog_result["songs"]:
+                if song.get("id") not in existing_ids:
+                    candidates.append(song)
+                    existing_ids.add(song.get("id"))
 
         # --- Step 2: semantic vibe search using the raw user request ---
         vibe_query = user_request or " ".join(
@@ -173,6 +249,34 @@ def recommender_node(state: AgentState) -> AgentState:
         # Remove songs the user excluded
         excluded = set(profile.excluded_song_ids or [])
         candidates = [c for c in candidates if c.get("id") not in excluded]
+
+        # --- Step 2.7: V1 classic scoring for comparison ---
+        # Run the original rule-based formula to populate v1_score on candidates.
+        # Only fires when the profile has enough structured fields.
+        _has_full_profile = (
+            profile.genre and profile.mood
+            and profile.energy is not None and profile.valence is not None
+            and profile.danceability is not None and profile.acousticness is not None
+        )
+        if _has_full_profile:
+            try:
+                v1_result = score_song_classic.invoke({
+                    "genre": profile.genre,
+                    "mood": profile.mood,
+                    "energy": profile.energy,
+                    "valence": profile.valence,
+                    "danceability": profile.danceability,
+                    "acousticness": profile.acousticness,
+                    "top_k": len(candidates) + 5,
+                })
+                tools_called.append("score_song_classic")
+                v1_by_id = {r["id"]: r["v1_score"] for r in v1_result.get("recommendations", [])}
+                for c in candidates:
+                    if c.get("id") in v1_by_id:
+                        c["v1_score"] = v1_by_id[c["id"]]
+                logger.info(f"[recommender] score_song_classic scored {len(v1_by_id)} songs")
+            except Exception as e:
+                logger.warning(f"[recommender] score_song_classic failed (non-fatal): {e}")
 
         # --- Step 3: diversity check ---
         if candidates:

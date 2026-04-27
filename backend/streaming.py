@@ -60,7 +60,9 @@ def _extract_event(node_name: str, node_output: dict) -> dict:
         tools = node_output.get("tool_calls_made", [])
         count = len(node_output.get("candidate_songs", []))
         if tools:
-            detail = f"{', '.join(tools)} → {count} candidates"
+            # Group for readability: show unique tools, candidate count
+            unique = list(dict.fromkeys(tools))  # preserve order, dedupe
+            detail = f"{', '.join(unique)} → {count} candidates"
 
     elif node_name == "bias_auditor":
         audit = node_output.get("bias_audit") or {}
