@@ -6,9 +6,12 @@ import { Separator } from "@/components/ui/separator";
 import { MessageBubble } from "@/components/MessageBubble";
 import { RecommendationCard } from "@/components/RecommendationCard";
 import { ProfileSidebar } from "@/components/ProfileSidebar";
+import { ThinkingPanel, StreamEvent } from "@/components/ThinkingPanel";
 import { gqlRequest } from "@/lib/graphql/client";
-import { CREATE_SESSION, SEND_MESSAGE, SEND_FEEDBACK, GET_SESSION } from "@/lib/graphql/queries";
-import { AgentResponse, SessionState, Message, SongRecommendation, UserProfile } from "@/lib/graphql/types";
+import { CREATE_SESSION, GET_SESSION } from "@/lib/graphql/queries";
+import { SessionState, Message, SongRecommendation, UserProfile } from "@/lib/graphql/types";
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
 const EMPTY_PROFILE: UserProfile = {
   genre: null, mood: null, energy: null, valence: null,
@@ -23,6 +26,8 @@ export default function Home() {
   const [recs, setRecs] = useState<SongRecommendation[]>([]);
   const [biasIssues, setBiasIssues] = useState<string[]>([]);
   const [toolsCalled, setToolsCalled] = useState<string[]>([]);
+  const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
+  const [feedbackCount, setFeedbackCount] = useState(0);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
@@ -45,85 +50,181 @@ export default function Home() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, recs]);
+  }, [messages, streamEvents, recs]);
 
-  /** Apply an AgentResponse to local state — messages are appended, never replaced */
-  function applyResponse(res: AgentResponse) {
-    if (res.assistantMessage) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: res.assistantMessage! },
-      ]);
-    }
-    if (res.recommendations?.length) setRecs(res.recommendations);
-    if (res.biasIssues) setBiasIssues(res.biasIssues);
-    if (res.toolsCalled) setToolsCalled(res.toolsCalled);
-    if (res.error) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Something went wrong: ${res.error}` },
-      ]);
-    }
-  }
-
-  /** Fetch the session to sync only the profile sidebar — never overwrites local chat messages */
+  /** Fetch full session to sync only the profile sidebar */
   async function refreshProfile(sid: string) {
     try {
       const data = await gqlRequest<{ session: SessionState }>(GET_SESSION, { sessionId: sid });
-      if (data.session) {
-        setProfile(data.session.userProfile);
-      }
-    } catch {
-      // non-blocking — sidebar is nice-to-have
-    }
-  }
-
-  async function sendMessage() {
-    const msg = input.trim();
-    if (!msg || loading || !sessionId) return;
-    setInput("");
-    setLoading(true);
-
-    // Optimistic user bubble
-    setMessages((prev) => [...prev, { role: "user", content: msg }]);
-
-    try {
-      const data = await gqlRequest<{ sendMessage: AgentResponse }>(SEND_MESSAGE, {
-        sessionId,
-        message: msg,
-      });
-      applyResponse(data.sendMessage);
-      await refreshProfile(sessionId);
-    } catch (err) {
-      setBackendError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleFeedback(songId: number, rating: string) {
-    if (!sessionId) return;
-    try {
-      const data = await gqlRequest<{ sendFeedback: AgentResponse }>(SEND_FEEDBACK, {
-        sessionId,
-        songId,
-        rating,
-      });
-      applyResponse(data.sendFeedback);
-      await refreshProfile(sessionId);
+      if (data.session) setProfile(data.session.userProfile);
     } catch {
       // non-blocking
     }
   }
 
-  async function startNewSession() {
-    const data = await gqlRequest<{ createSession: string }>(CREATE_SESSION);
-    setSessionId(data.createSession);
-    setMessages([]);
-    setProfile(EMPTY_PROFILE);
+  /** Stream sendMessage via SSE — updates UI event by event */
+  async function sendMessage() {
+    const msg = input.trim();
+    if (!msg || loading || !sessionId) return;
+    setInput("");
+    setLoading(true);
+    setStreamEvents([]);
     setRecs([]);
     setBiasIssues([]);
-    setToolsCalled([]);
+
+    // Optimistic user bubble
+    setMessages((prev) => [...prev, { role: "user", content: msg }]);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, message: msg }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Stream HTTP error: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? ""; // keep incomplete last line
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+
+            if (event.type === "node") {
+              setStreamEvents((prev) => [...prev, event as StreamEvent]);
+
+            } else if (event.type === "done") {
+              if (event.assistantMessage) {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: event.assistantMessage },
+                ]);
+              }
+              if (event.recommendations?.length) setRecs(event.recommendations);
+              if (event.biasIssues) setBiasIssues(event.biasIssues);
+              if (event.toolsCalled) setToolsCalled(event.toolsCalled);
+              if (event.error) {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: `Something went wrong: ${event.error}` },
+                ]);
+              }
+
+            } else if (event.type === "error") {
+              setMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: `Error: ${event.error}` },
+              ]);
+            }
+          } catch {
+            // malformed SSE line — skip
+          }
+        }
+      }
+    } catch (err) {
+      setBackendError(String(err));
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Could not reach the backend. Is uvicorn running?" },
+      ]);
+    } finally {
+      setLoading(false);
+      if (sessionId) await refreshProfile(sessionId);
+    }
+  }
+
+  async function handleFeedback(songId: number, rating: string) {
+    if (!sessionId || loading) return;
+
+    const ratingMessage: Record<string, string> = {
+      liked:         `I liked song #${songId}`,
+      disliked:      `I didn't like song #${songId}, please don't recommend it again`,
+      more_like_this:`More songs like #${songId} please`,
+      less_like_this:`Fewer songs like #${songId}`,
+    };
+    const message = ratingMessage[rating];
+    if (!message) return;
+
+    setFeedbackCount((n) => n + 1);
+    // Show the feedback action as a user bubble, then stream the response
+    setMessages((prev) => [...prev, { role: "user", content: message }]);
+    setLoading(true);
+    setStreamEvents([]);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, message }),
+      });
+
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "node") {
+              setStreamEvents((prev) => [...prev, event]);
+            } else if (event.type === "done") {
+              if (event.assistantMessage) {
+                setMessages((prev) => [...prev, { role: "assistant", content: event.assistantMessage }]);
+              }
+              if (event.recommendations?.length) setRecs(event.recommendations);
+              if (event.biasIssues) setBiasIssues(event.biasIssues);
+              if (event.toolsCalled) setToolsCalled(event.toolsCalled);
+            } else if (event.type === "error") {
+              setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${event.error}` }]);
+            }
+          } catch { /* skip malformed */ }
+        }
+      }
+    } catch {
+      // non-blocking — feedback is best-effort
+    } finally {
+      setLoading(false);
+      await refreshProfile(sessionId);
+    }
+  }
+
+  async function startNewSession() {
+    try {
+      const data = await gqlRequest<{ createSession: string }>(CREATE_SESSION);
+      setSessionId(data.createSession);
+      setMessages([]);
+      setProfile(EMPTY_PROFILE);
+      setRecs([]);
+      setBiasIssues([]);
+      setStreamEvents([]);
+      setToolsCalled([]);
+      setFeedbackCount(0);
+    } catch {
+      // non-blocking
+    }
   }
 
   return (
@@ -153,7 +254,7 @@ export default function Home() {
 
         {/* Messages */}
         <ScrollArea className="flex-1 px-4 py-3">
-          {messages.length === 0 && !loading && (
+          {messages.length === 0 && streamEvents.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground">
               <span className="text-4xl">🎧</span>
               <p className="text-sm">
@@ -171,10 +272,10 @@ export default function Home() {
             ))}
           </div>
 
-          {loading && (
-            <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="animate-pulse">🎵</span>
-              <span>Agent is thinking…</span>
+          {/* Live streaming thought panel — shown while loading or just after */}
+          {(loading || streamEvents.length > 0) && (
+            <div className="mt-3">
+              <ThinkingPanel events={streamEvents} isLoading={loading} />
             </div>
           )}
 
@@ -227,7 +328,7 @@ export default function Home() {
               disabled={loading || !input.trim() || !sessionId}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-50"
             >
-              Send
+              {loading ? "…" : "Send"}
             </button>
           </form>
         </div>
@@ -238,7 +339,7 @@ export default function Home() {
         <div className="w-64 shrink-0 border-l border-border">
           <ProfileSidebar
             profile={profile}
-            feedbackEntries={[]}
+            feedbackCount={feedbackCount}
             toolsCalled={toolsCalled}
             messageCount={messages.length}
             onNewSession={startNewSession}

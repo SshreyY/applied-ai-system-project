@@ -142,6 +142,20 @@ def recommender_node(state: AgentState) -> AgentState:
         vibe_query = user_request or " ".join(
             str(v) for v in [profile.genre, profile.mood, profile.activity] if v
         )
+
+        # Enrich vibe query with liked song details so "more like this" works
+        liked_ids = profile.liked_song_ids or []
+        if liked_ids:
+            catalog = _get_catalog_lookup()
+            liked_snippets = []
+            for lid in liked_ids[:3]:  # cap to avoid bloating the query
+                s = catalog.get(lid)
+                if s:
+                    liked_snippets.append(f"{s['title']} ({s['genre']}, {s['mood']})")
+            if liked_snippets:
+                vibe_query = vibe_query + " similar to " + ", ".join(liked_snippets)
+                logger.info(f"[recommender] liked seeds added to vibe query: {liked_snippets}")
+
         logger.info(f"[recommender] vibe_search query={vibe_query!r}")
         vibe_result = vibe_search.invoke({"query": vibe_query, "n_results": 8})
         tools_called.append("vibe_search")
@@ -174,11 +188,22 @@ def recommender_node(state: AgentState) -> AgentState:
         cb, lf_meta = get_callback_handler(state.session_id, "recommender")
         invoke_kwargs = {"config": {"callbacks": [cb], "metadata": lf_meta, "run_name": "recommender"}} if cb else {}
 
+        liked_context = ""
+        if liked_ids:
+            cat = _get_catalog_lookup()
+            liked_songs = [cat[lid] for lid in liked_ids if lid in cat]
+            if liked_songs:
+                liked_context = (
+                    f"\nUser has LIKED these songs — prioritise similar ones:\n"
+                    + json.dumps(liked_songs, indent=2) + "\n"
+                )
+
         format_messages = [
             SystemMessage(content=FORMAT_PROMPT),
             HumanMessage(content=(
                 f"User profile: {json.dumps(profile_summary)}\n"
-                f"User request: {user_request}\n\n"
+                f"User request: {user_request}\n"
+                f"{liked_context}\n"
                 f"Candidate songs ({len(candidates)} total):\n"
                 f"{json.dumps(candidates, indent=2)}"
             )),
