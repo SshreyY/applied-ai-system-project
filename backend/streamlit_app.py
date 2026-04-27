@@ -1,7 +1,7 @@
 """
 Streamlit quick-test app for VibeFinder Agent backend.
 
-Calls the agent graph directly (no FastAPI layer) for rapid iteration.
+Uses LangGraph stream() to show live node-by-node execution.
 
 Run with:
     streamlit run backend/streamlit_app.py
@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 import streamlit as st
-from backend.graph import run_agent
+from backend.graph import compiled_graph
+from backend.state import AgentState, ConversationMessage
 from backend.session import create_session, get_session, update_session
 
 st.set_page_config(page_title="VibeFinder Agent — Dev Console", page_icon="🎵", layout="wide")
@@ -38,20 +39,27 @@ with col2:
 
 st.divider()
 
-# Two-column layout: chat left, profile right
 chat_col, profile_col = st.columns([2, 1])
+
+# Node display config
+NODE_LABELS = {
+    "router":           ("🔀", "Intent Router"),
+    "profile_builder":  ("👤", "Profile Builder"),
+    "recommender":      ("🎯", "Recommender (ReAct)"),
+    "bias_auditor":     ("🔍", "Bias Auditor"),
+    "feedback_handler": ("💬", "Feedback Handler"),
+    "general_chat":     ("💡", "General Chat"),
+}
 
 with chat_col:
     st.subheader("Chat")
 
-    # Display conversation history
     state = get_session(st.session_state.session_id) or {}
     messages = state.get("messages", [])
     for msg in messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # Display recommendations if any
     recs = state.get("final_recommendations") or state.get("candidate_songs") or []
     if recs:
         st.subheader("Recommendations")
@@ -65,17 +73,95 @@ with chat_col:
                 if rec.get("v1_score") is not None:
                     st.caption(f"V1 score: {rec['v1_score']:.2f} / 7.5")
 
-        # Bias audit
         audit = state.get("bias_audit") or {}
         if isinstance(audit, dict) and audit.get("issues"):
             st.warning("**Bias Auditor flagged:**\n" + "\n".join(f"- {i}" for i in audit["issues"]))
 
-    # Chat input
     if prompt := st.chat_input("Describe your vibe, ask for songs, or give feedback..."):
-        with st.spinner("Agent thinking..."):
-            existing = get_session(st.session_state.session_id)
-            result = run_agent(st.session_state.session_id, prompt, existing)
-            update_session(st.session_state.session_id, result)
+        with st.chat_message("user"):
+            st.write(prompt)
+
+        # Build initial state
+        existing = get_session(st.session_state.session_id)
+        if existing:
+            agent_state = AgentState(**existing)
+        else:
+            agent_state = AgentState(session_id=st.session_state.session_id)
+
+        agent_state.messages.append(ConversationMessage(role="user", content=prompt))
+        agent_state.error = None
+
+        # Stream with live node updates
+        with st.status("Agent processing...", expanded=True) as status:
+            final_state = None
+
+            try:
+                for node_name, node_output in compiled_graph.stream(
+                    agent_state.model_dump(),
+                    config={"recursion_limit": 25},
+                    stream_mode="updates",
+                ):
+                    icon, label = NODE_LABELS.get(node_name, ("⚙️", node_name))
+
+                    # Pull useful info out of the node output to display
+                    details = []
+
+                    intent = node_output.get("intent")
+                    if intent:
+                        details.append(f"Intent: **{intent}**")
+
+                    profile = node_output.get("user_profile", {})
+                    if profile:
+                        profile_bits = [
+                            f"{k}={v}" for k, v in profile.items()
+                            if v is not None and v != [] and k not in ("excluded_song_ids", "liked_song_ids")
+                        ]
+                        if profile_bits:
+                            details.append("Profile: " + ", ".join(profile_bits))
+
+                    tools = node_output.get("tool_calls_made")
+                    if tools:
+                        details.append("Tools called: " + ", ".join(f"`{t}`" for t in tools))
+
+                    candidates = node_output.get("candidate_songs") or []
+                    if candidates:
+                        details.append(f"Candidates found: **{len(candidates)}** songs")
+
+                    audit = node_output.get("bias_audit") or {}
+                    if isinstance(audit, dict):
+                        if audit.get("passed") is True:
+                            details.append("✅ Bias audit: **passed**")
+                        elif audit.get("passed") is False:
+                            issues = audit.get("issues", [])
+                            details.append(f"⚠️ Bias audit: **{len(issues)} issue(s)** — " + "; ".join(issues[:2]))
+
+                    final_recs = node_output.get("final_recommendations") or []
+                    if final_recs:
+                        details.append(f"Final recommendations: **{len(final_recs)}** songs")
+
+                    error = node_output.get("error")
+                    if error:
+                        details.append(f"❌ Error: {error}")
+
+                    detail_str = "\n\n".join(details) if details else ""
+                    st.write(f"{icon} **{label}**" + (f"\n\n{detail_str}" if detail_str else ""))
+
+                    # Keep track of the latest full state
+                    final_state = node_output
+
+                status.update(label="✅ Done", state="complete", expanded=False)
+
+            except Exception as e:
+                status.update(label=f"❌ Error: {e}", state="error")
+                st.error(str(e))
+
+        # Save updated state and refresh
+        if final_state is not None:
+            # Merge back into existing session state
+            existing = get_session(st.session_state.session_id) or {}
+            existing.update(final_state)
+            update_session(st.session_state.session_id, existing)
+
         st.rerun()
 
 with profile_col:

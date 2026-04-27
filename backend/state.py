@@ -76,6 +76,7 @@ class AgentState(BaseModel):
     conflict_description: Optional[str] = None
     error: Optional[str] = None
     tool_calls_made: list[str] = Field(default_factory=list)
+    rerank_count: int = 0
 
     class Config:
         # Allow extra fields so LangGraph can attach its own metadata

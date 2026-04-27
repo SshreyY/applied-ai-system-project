@@ -9,21 +9,21 @@ If clean, recommendations are finalized and flow continues to the API response.
 import json
 import logging
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.state import AgentState, BiasAuditResult
 
 logger = logging.getLogger(__name__)
 
-_llm: ChatGoogleGenerativeAI | None = None
+_llm: ChatGroq | None = None
 
 
-def _get_llm() -> ChatGoogleGenerativeAI:
+def _get_llm() -> ChatGroq:
     global _llm
     if _llm is None:
-        _llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
+        _llm = ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=os.getenv("GROQ_API_KEY"),
             temperature=0,
         )
     return _llm
@@ -112,7 +112,6 @@ def bias_auditor_node(state: AgentState) -> AgentState:
 
     except Exception as e:
         logger.error(f"[bias_auditor] error: {e}")
-        # On auditor failure, pass through to avoid blocking the user
         state.bias_audit = BiasAuditResult(
             passed=True,
             issues=[],
@@ -126,15 +125,16 @@ def bias_auditor_node(state: AgentState) -> AgentState:
 def should_rerank(state: AgentState) -> str:
     """
     Conditional edge function for LangGraph.
-    Returns 'rerank' if the auditor found issues, 'finalize' if clean.
+    Only allows one re-rank attempt to prevent infinite loops.
     """
-    if state.bias_audit is None:
+    if state.bias_audit is None or state.bias_audit.passed:
         return "finalize"
-    # Only re-rank once to avoid infinite loops
-    if state.bias_audit.passed:
-        return "finalize"
-    if len(state.tool_calls_made) > 12:
-        logger.warning("[bias_auditor] max tool calls reached, forcing finalize")
+
+    # Force finalize if we've already re-ranked once, have no candidates, or hit tool limit
+    if state.rerank_count >= 1 or not state.candidate_songs or len(state.tool_calls_made) > 10:
+        logger.warning("[bias_auditor] forcing finalize to prevent loop")
         state.final_recommendations = state.candidate_songs
         return "finalize"
+
+    state.rerank_count += 1
     return "rerank"

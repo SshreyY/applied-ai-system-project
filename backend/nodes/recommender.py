@@ -9,7 +9,7 @@ final recommendations with explanations and confidence scores.
 import json
 import logging
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from backend.state import AgentState, SongRecommendation
 from backend.tools.catalog_search import catalog_search
@@ -32,15 +32,15 @@ TOOLS = [
     detect_preference_conflicts,
 ]
 
-_llm_with_tools: ChatGoogleGenerativeAI | None = None
+_llm_with_tools: ChatGroq | None = None
 
 
-def _get_llm() -> ChatGoogleGenerativeAI:
+def _get_llm() -> ChatGroq:
     global _llm_with_tools
     if _llm_with_tools is None:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
+        llm = ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=os.getenv("GROQ_API_KEY"),
             temperature=0.3,
         )
         _llm_with_tools = llm.bind_tools(TOOLS)

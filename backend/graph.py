@@ -33,7 +33,7 @@ def _route_intent(state: AgentState) -> str:
 
 def _general_chat_response(state: AgentState) -> AgentState:
     """Simple pass-through for non-recommendation intents."""
-    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_groq import ChatGroq
     from langchain_core.messages import SystemMessage, HumanMessage
     import os
 
@@ -42,9 +42,9 @@ def _general_chat_response(state: AgentState) -> AgentState:
         return state
 
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
+        llm = ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=os.getenv("GROQ_API_KEY"),
             temperature=0.7,
         )
         response = llm.invoke([
@@ -116,7 +116,7 @@ def build_graph() -> StateGraph:
     return graph.compile()
 
 
-# Module-level compiled graph instance
+# Module-level compiled graph instance (recursion_limit prevents runaway loops)
 compiled_graph = build_graph()
 
 
@@ -142,5 +142,8 @@ def run_agent(session_id: str, user_message: str, existing_state: dict | None = 
     state.messages.append(ConversationMessage(role="user", content=user_message))
     state.error = None
 
-    result = compiled_graph.invoke(state.model_dump())
+    result = compiled_graph.invoke(
+        state.model_dump(),
+        config={"recursion_limit": 25},
+    )
     return result

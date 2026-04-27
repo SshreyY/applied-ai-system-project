@@ -9,21 +9,21 @@ so the recommender has better context on the next pass.
 import json
 import logging
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.state import AgentState, FeedbackEntry
 
 logger = logging.getLogger(__name__)
 
-_llm: ChatGoogleGenerativeAI | None = None
+_llm: ChatGroq | None = None
 
 
-def _get_llm() -> ChatGoogleGenerativeAI:
+def _get_llm() -> ChatGroq:
     global _llm
     if _llm is None:
-        _llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
+        _llm = ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=os.getenv("GROQ_API_KEY"),
             temperature=0,
         )
     return _llm
