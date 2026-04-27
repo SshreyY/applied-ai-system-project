@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
 from backend.schema import schema
 
-graphql_router = GraphQLRouter(schema, graphiql=True)
+graphql_router = GraphQLRouter(schema)
 
 app = FastAPI(
     title="VibeFinder Agent API",

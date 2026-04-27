@@ -101,6 +101,11 @@ def bias_auditor_node(state: AgentState) -> AgentState:
         # Always populate final_recommendations — the graph reads this at END
         state.final_recommendations = candidates
 
+        # Increment rerank_count HERE (inside the node) so LangGraph persists it.
+        # should_rerank() is a conditional edge — mutations there are NOT saved.
+        if not audit.passed:
+            state.rerank_count += 1
+
     except Exception as e:
         logger.error(f"[bias_auditor] error: {e}")
         state.bias_audit = BiasAuditResult(
@@ -116,16 +121,23 @@ def bias_auditor_node(state: AgentState) -> AgentState:
 def should_rerank(state: AgentState) -> str:
     """
     Conditional edge function for LangGraph.
-    Only allows one re-rank attempt to prevent infinite loops.
-    State mutations here are NOT persisted by LangGraph — only return the routing string.
+    rerank_count is incremented by bias_auditor_node (not here — LangGraph
+    does not persist state mutations made inside conditional edge functions).
+
+    Allows exactly ONE re-rank (rerank_count goes 1 → 2 on second failure).
     """
     if state.bias_audit is None or state.bias_audit.passed:
         return "finalize"
 
-    # Force finalize after one re-rank attempt, no candidates, or too many tool calls
-    if state.rerank_count >= 1 or not state.candidate_songs or len(state.tool_calls_made) > 10:
-        logger.warning("[bias_auditor] forcing finalize to prevent loop")
+    if not state.candidate_songs:
+        logger.warning("[bias_auditor] no candidates, forcing finalize")
         return "finalize"
 
-    state.rerank_count += 1
+    # rerank_count was incremented in bias_auditor_node before this is called.
+    # After the first failure it is 1 → allow one re-rank.
+    # After the second failure it is 2 → force finalize.
+    if state.rerank_count >= 2:
+        logger.warning("[bias_auditor] rerank limit reached, forcing finalize")
+        return "finalize"
+
     return "rerank"

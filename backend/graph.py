@@ -31,6 +31,22 @@ def _route_intent(state: AgentState) -> str:
     return intent
 
 
+def _finalize_response(state: AgentState) -> AgentState:
+    """Append a human-readable assistant message after recommendations are finalized."""
+    from backend.state import ConversationMessage
+    recs = state.final_recommendations
+    if recs:
+        count = len(recs)
+        top = recs[0]
+        names = ", ".join(f"**{r.title}** by {r.artist}" for r in recs[:2])
+        tail = f" and {count - 2} more" if count > 2 else ""
+        msg = f"Here are {count} picks that match your vibe: {names}{tail}. Let me know what you think!"
+    else:
+        msg = "I couldn't find songs that match right now — try describing your mood or activity differently!"
+    state.messages.append(ConversationMessage(role="assistant", content=msg))
+    return state
+
+
 def _general_chat_response(state: AgentState) -> AgentState:
     """Simple pass-through for non-recommendation intents."""
     from langchain_groq import ChatGroq
@@ -75,6 +91,7 @@ def build_graph() -> StateGraph:
     graph.add_node("profile_builder", lambda s: profile_builder_node(AgentState(**s)).model_dump())
     graph.add_node("recommender", lambda s: recommender_node(AgentState(**s)).model_dump())
     graph.add_node("bias_auditor", lambda s: bias_auditor_node(AgentState(**s)).model_dump())
+    graph.add_node("finalize_response", lambda s: _finalize_response(AgentState(**s)).model_dump())
     graph.add_node("feedback_handler", lambda s: feedback_node(AgentState(**s)).model_dump())
     graph.add_node("general_chat", lambda s: _general_chat_response(AgentState(**s)).model_dump())
 
@@ -103,9 +120,10 @@ def build_graph() -> StateGraph:
         lambda s: should_rerank(AgentState(**s)),
         {
             "rerank": "recommender",
-            "finalize": END,
+            "finalize": "finalize_response",
         },
     )
+    graph.add_edge("finalize_response", END)
 
     # --- Feedback flow: re-recommend after updating profile ---
     graph.add_edge("feedback_handler", "recommender")

@@ -176,6 +176,50 @@ def _last_assistant_message(state: dict) -> str | None:
     return None
 
 
+def _empty_response(session_id: str, error: str) -> AgentResponseType:
+    return AgentResponseType(
+        session_id=session_id,
+        recommendations=[],
+        assistant_message=None,
+        conflict_detected=False,
+        conflict_description=None,
+        bias_issues=[],
+        tools_called=[],
+        error=error,
+    )
+
+
+def _run_agent_mutation(session_id: str, message: str) -> AgentResponseType:
+    """Shared implementation for sendMessage and sendFeedback mutations."""
+    existing = session_mgr.get_session(session_id)
+    if existing is None:
+        return _empty_response(session_id, f"Session {session_id} not found. Call createSession first.")
+
+    try:
+        result_state = run_agent(session_id, message, existing)
+        session_mgr.update_session(session_id, result_state)
+
+        recs = _recs_from_state(result_state)
+        assistant_msg = _last_assistant_message(result_state)
+        bias_audit = result_state.get("bias_audit") or {}
+        bias_issues = bias_audit.get("issues", []) if isinstance(bias_audit, dict) else []
+
+        return AgentResponseType(
+            session_id=session_id,
+            recommendations=recs,
+            assistant_message=assistant_msg,
+            conflict_detected=result_state.get("conflict_detected", False),
+            conflict_description=result_state.get("conflict_description"),
+            bias_issues=bias_issues,
+            tools_called=result_state.get("tool_calls_made", []),
+            error=result_state.get("error"),
+        )
+
+    except Exception as e:
+        logger.error(f"[schema] agent error: {e}")
+        return _empty_response(session_id, str(e))
+
+
 # ---------------------------------------------------------------------------
 # Queries
 # ---------------------------------------------------------------------------
@@ -220,65 +264,15 @@ class Mutation:
 
     @strawberry.mutation
     def send_message(self, session_id: str, message: str) -> AgentResponseType:
-        existing = session_mgr.get_session(session_id)
-        if existing is None:
-            return AgentResponseType(
-                session_id=session_id,
-                recommendations=[],
-                assistant_message=None,
-                conflict_detected=False,
-                conflict_description=None,
-                bias_issues=[],
-                tools_called=[],
-                error=f"Session {session_id} not found. Call createSession first.",
-            )
-
-        try:
-            result_state = run_agent(session_id, message, existing)
-            session_mgr.update_session(session_id, result_state)
-
-            recs = _recs_from_state(result_state)
-            assistant_msg = _last_assistant_message(result_state)
-            bias_audit = result_state.get("bias_audit") or {}
-            bias_issues = bias_audit.get("issues", []) if isinstance(bias_audit, dict) else []
-
-            return AgentResponseType(
-                session_id=session_id,
-                recommendations=recs,
-                assistant_message=assistant_msg,
-                conflict_detected=result_state.get("conflict_detected", False),
-                conflict_description=result_state.get("conflict_description"),
-                bias_issues=bias_issues,
-                tools_called=result_state.get("tool_calls_made", []),
-                error=result_state.get("error"),
-            )
-
-        except Exception as e:
-            logger.error(f"[schema] send_message error: {e}")
-            return AgentResponseType(
-                session_id=session_id,
-                recommendations=[],
-                assistant_message=None,
-                conflict_detected=False,
-                conflict_description=None,
-                bias_issues=[],
-                tools_called=[],
-                error=str(e),
-            )
+        return _run_agent_mutation(session_id, message)
 
     @strawberry.mutation
     def send_feedback(self, session_id: str, song_id: int, rating: str) -> AgentResponseType:
         valid_ratings = {"liked", "disliked", "more_like_this", "less_like_this"}
         if rating not in valid_ratings:
-            return AgentResponseType(
-                session_id=session_id,
-                recommendations=[],
-                assistant_message=None,
-                conflict_detected=False,
-                conflict_description=None,
-                bias_issues=[],
-                tools_called=[],
-                error=f"Invalid rating '{rating}'. Must be one of: {', '.join(valid_ratings)}",
+            return _empty_response(
+                session_id,
+                f"Invalid rating '{rating}'. Must be one of: {', '.join(valid_ratings)}",
             )
 
         rating_message = {
@@ -288,7 +282,7 @@ class Mutation:
             "less_like_this": f"Fewer songs like #{song_id}",
         }[rating]
 
-        return self.send_message(session_id=session_id, message=rating_message)
+        return _run_agent_mutation(session_id, rating_message)
 
     @strawberry.mutation
     def clear_session(self, session_id: str) -> bool:

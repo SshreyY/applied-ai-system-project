@@ -5,6 +5,7 @@ Tools are called directly (no LLM tool-calling API) to avoid Groq's
 tool_use_failed errors. The LLM's only job is formatting the final JSON.
 """
 
+import csv
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ from backend.tools.diversity_check import check_diversity
 logger = logging.getLogger(__name__)
 
 _llm: ChatGroq | None = None
+_catalog_lookup: dict[int, dict] | None = None
 
 FORMAT_PROMPT = (
     "You are a music recommendation engine. "
@@ -41,6 +43,57 @@ def _get_llm() -> ChatGroq:
             temperature=0,
         )
     return _llm
+
+
+def _get_catalog_lookup() -> dict[int, dict]:
+    """Load songs.csv once and return a dict keyed by song id."""
+    global _catalog_lookup
+    if _catalog_lookup is None:
+        catalog_path = os.getenv("CATALOG_PATH", "backend/data/songs.csv")
+        _catalog_lookup = {}
+        try:
+            with open(catalog_path, newline="", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    sid = int(row["id"])
+                    _catalog_lookup[sid] = {
+                        "title": row.get("title", ""),
+                        "artist": row.get("artist", ""),
+                        "genre": row.get("genre") or "unknown",
+                        "mood": row.get("mood") or "unknown",
+                        "energy": _safe_float(row.get("energy"), 0.5),
+                        "valence": _safe_float(row.get("valence"), 0.5),
+                        "danceability": _safe_float(row.get("danceability"), 0.5),
+                        "acousticness": _safe_float(row.get("acousticness"), 0.5),
+                    }
+        except Exception as e:
+            logger.warning(f"[recommender] catalog lookup load failed: {e}")
+    return _catalog_lookup
+
+
+def _safe_float(value, default: float) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _enrich_from_catalog(candidates: list[dict]) -> list[dict]:
+    """Fill in None/missing fields on candidates using the CSV catalog."""
+    lookup = _get_catalog_lookup()
+    enriched = []
+    for song in candidates:
+        sid = song.get("id")
+        if sid and sid in lookup:
+            catalog_song = lookup[sid]
+            merged = dict(catalog_song)  # start with full catalog data
+            merged.update({k: v for k, v in song.items() if v is not None and v != "unknown"})
+            merged["id"] = sid  # always keep the id
+            enriched.append(merged)
+        else:
+            enriched.append(song)
+    return enriched
 
 
 def recommender_node(state: AgentState) -> AgentState:
@@ -99,6 +152,14 @@ def recommender_node(state: AgentState) -> AgentState:
                     candidates.append(song)
                     existing_ids.add(song.get("id"))
 
+        # --- Step 2.5: enrich candidates with full catalog data ---
+        # vibe_search returns ChromaDB documents that may have None fields.
+        candidates = _enrich_from_catalog(candidates)
+
+        # Remove songs the user excluded
+        excluded = set(profile.excluded_song_ids or [])
+        candidates = [c for c in candidates if c.get("id") not in excluded]
+
         # --- Step 3: diversity check ---
         if candidates:
             logger.info(f"[recommender] check_diversity on {len(candidates)} candidates")
@@ -123,7 +184,7 @@ def recommender_node(state: AgentState) -> AgentState:
             )),
         ]
         response = _get_llm().invoke(format_messages, **invoke_kwargs)
-        state.candidate_songs = _parse_recommendations(response.content or "")
+        state.candidate_songs = _parse_recommendations(response.content or "", candidates)
 
     except Exception as e:
         logger.error(f"[recommender] error: {e}")
@@ -133,21 +194,26 @@ def recommender_node(state: AgentState) -> AgentState:
     return state
 
 
-def _parse_recommendations(content: str) -> list[SongRecommendation]:
-    """Extract JSON recommendations from the LLM's final response."""
+def _parse_recommendations(content: str, candidates: list[dict]) -> list[SongRecommendation]:
+    """Extract JSON recommendations from the LLM's response.
+
+    Falls back to the catalog data for any None fields the LLM omits.
+    """
+    catalog = _get_catalog_lookup()
+
+    # Build id → candidate lookup for fallback
+    candidate_by_id = {c["id"]: c for c in candidates if c.get("id")}
+
     try:
-        # Strip markdown fences
         text = content.strip()
         if "```" in text:
             parts = text.split("```")
             for part in parts:
-                if part.strip().startswith("{") or part.strip().startswith("json"):
-                    text = part.strip()
-                    if text.startswith("json"):
-                        text = text[4:].strip()
+                clean = part.strip()
+                if clean.startswith("{") or clean.startswith("json"):
+                    text = clean[4:].strip() if clean.startswith("json") else clean
                     break
 
-        # Find JSON object
         start = text.find("{")
         end = text.rfind("}") + 1
         if start == -1 or end == 0:
@@ -160,20 +226,24 @@ def _parse_recommendations(content: str) -> list[SongRecommendation]:
         results = []
         for r in recs_raw:
             try:
+                sid = int(r["id"])
+                # Merge: catalog > candidate > LLM output (fallback chain)
+                base = {**(catalog.get(sid, {})), **(candidate_by_id.get(sid, {})), **r}
+
                 rec = SongRecommendation(
-                    id=int(r["id"]),
-                    title=r["title"],
-                    artist=r["artist"],
-                    genre=r["genre"],
-                    mood=r["mood"],
-                    energy=float(r.get("energy", 0.5)),
-                    valence=float(r.get("valence", 0.5)),
-                    danceability=float(r.get("danceability", 0.5)),
-                    acousticness=float(r.get("acousticness", 0.5)),
-                    score=float(r.get("score", 5.0)),
-                    confidence=float(r.get("confidence", 0.5)),
-                    explanation=r.get("explanation", ""),
-                    v1_score=float(r["v1_score"]) if r.get("v1_score") is not None else None,
+                    id=sid,
+                    title=str(base.get("title") or r.get("title", "")),
+                    artist=str(base.get("artist") or r.get("artist", "")),
+                    genre=str(base.get("genre") or "unknown"),
+                    mood=str(base.get("mood") or "unknown"),
+                    energy=_safe_float(base.get("energy"), 0.5),
+                    valence=_safe_float(base.get("valence"), 0.5),
+                    danceability=_safe_float(base.get("danceability"), 0.5),
+                    acousticness=_safe_float(base.get("acousticness"), 0.5),
+                    score=_safe_float(base.get("score"), 0.5),
+                    confidence=_safe_float(base.get("confidence"), 0.5),
+                    explanation=str(r.get("explanation") or ""),
+                    v1_score=_safe_float(r.get("v1_score"), None) if r.get("v1_score") is not None else None,
                 )
                 results.append(rec)
             except Exception as e:
