@@ -9,6 +9,7 @@ import logging
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.state import AgentState, ConversationMessage
+from backend.langfuse_callback import get_callback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +51,12 @@ def router_node(state: AgentState) -> AgentState:
 
     try:
         llm = _get_llm()
+        cb = get_callback_handler(state.session_id, "router")
+        kwargs = {"config": {"callbacks": [cb]}} if cb else {}
         response = llm.invoke([
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=latest.content),
-        ])
+        ], **kwargs)
         raw = response.content.strip().lower()
         valid = {"recommend", "song_question", "feedback", "general_chat"}
         intent = raw if raw in valid else "general_chat"

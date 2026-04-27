@@ -12,6 +12,7 @@ import os
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from backend.state import AgentState, SongRecommendation
+from backend.langfuse_callback import get_callback_handler
 from backend.tools.catalog_search import catalog_search
 from backend.tools.vibe_search import vibe_search
 from backend.tools.genre_knowledge import lookup_genre_info
@@ -121,9 +122,11 @@ def recommender_node(state: AgentState) -> AgentState:
 
     try:
         llm = _get_llm()
+        cb = get_callback_handler(state.session_id, "recommender")
+        invoke_kwargs = {"config": {"callbacks": [cb]}} if cb else {}
 
         for iteration in range(max_iterations):
-            response = llm.invoke(messages)
+            response = llm.invoke(messages, **invoke_kwargs)
             messages.append(response)
 
             if not response.tool_calls:

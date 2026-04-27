@@ -9,6 +9,7 @@ import os
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from backend.state import AgentState, UserProfile
+from backend.langfuse_callback import get_callback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,12 @@ def profile_builder_node(state: AgentState) -> AgentState:
 
     try:
         llm = _get_llm()
+        cb = get_callback_handler(state.session_id, "profile_builder")
+        kwargs = {"config": {"callbacks": [cb]}} if cb else {}
         response = llm.invoke([
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=latest.content),
-        ])
+        ], **kwargs)
         raw = response.content.strip()
 
         # Strip markdown code fences if present
