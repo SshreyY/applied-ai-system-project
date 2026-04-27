@@ -13,8 +13,27 @@ Graph structure:
 """
 
 import logging
+from typing import Optional, TypedDict
 from langgraph.graph import StateGraph, START, END
 from backend.state import AgentState
+
+
+class GraphState(TypedDict, total=False):
+    """TypedDict mirror of AgentState — gives LangGraph named channels so
+    get_graph().draw_mermaid_png() works correctly."""
+    session_id: str
+    messages: list
+    user_profile: dict
+    intent: Optional[str]
+    candidate_songs: list
+    final_recommendations: list
+    feedback_entries: list
+    bias_audit: Optional[dict]
+    conflict_detected: bool
+    conflict_description: Optional[str]
+    error: Optional[str]
+    tool_calls_made: list
+    rerank_count: int
 from backend.nodes.router import router_node
 from backend.nodes.profile_builder import profile_builder_node
 from backend.nodes.recommender import recommender_node
@@ -131,8 +150,7 @@ def _general_chat_response(state: AgentState) -> AgentState:
 def build_graph() -> StateGraph:
     """Build and compile the VibeFinder LangGraph StateGraph."""
 
-    # Use dict-based state for LangGraph compatibility
-    graph = StateGraph(dict)
+    graph = StateGraph(GraphState)
 
     # --- Add nodes ---
     graph.add_node("router", lambda s: router_node(AgentState(**s)).model_dump())
