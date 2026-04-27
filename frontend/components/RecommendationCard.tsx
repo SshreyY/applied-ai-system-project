@@ -72,7 +72,8 @@ export function RecommendationCard({ rec, rank, onFeedback }: Props) {
 
         {rec.v1Score !== null && rec.v1Score !== undefined && (
           <p className="text-xs text-muted-foreground">
-            V1 score: {rec.v1Score.toFixed(2)} / 7.5
+            Rule-based score: {rec.v1Score.toFixed(2)} / 7.5
+            <span className="ml-1 opacity-60">(classic formula baseline)</span>
           </p>
         )}
 

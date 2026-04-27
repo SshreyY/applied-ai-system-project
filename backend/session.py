@@ -27,6 +27,21 @@ def get_session(session_id: str) -> dict | None:
     return _sessions.get(session_id)
 
 
+def get_or_create_session(session_id: str) -> dict:
+    """Return the session if it exists; otherwise create a fresh one with the same ID.
+
+    This handles server restarts (hot-reload in dev) where in-memory sessions
+    are wiped but the frontend still holds the old session_id.
+    """
+    existing = _sessions.get(session_id)
+    if existing is not None:
+        return existing
+    state = AgentState(session_id=session_id)
+    _sessions[session_id] = state.model_dump()
+    logger.info(f"[session] auto-recreated session_id={session_id} (server restart recovery)")
+    return _sessions[session_id]
+
+
 def update_session(session_id: str, state: dict) -> None:
     _sessions[session_id] = state
 
