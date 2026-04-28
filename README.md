@@ -14,6 +14,10 @@ VibeFinder Agent replaces that rule-based system with a fully agentic AI applica
 
 The point isn't just to recommend music. It's to show how agentic AI patterns like tool calling, self-critique, feedback loops, and retrieval-augmented generation can turn a static algorithm into a system that actually converses, adapts, and improves over the course of a conversation.
 
+## Demo
+
+[![Watch the demo](https://img.shields.io/badge/Watch%20Demo-Loom-purple?style=for-the-badge&logo=loom)](https://www.loom.com/share/0763766b1d7e42fbb094c7a4c1962e99)
+
 ## System Diagrams
 
 ### 1. Class Diagram
