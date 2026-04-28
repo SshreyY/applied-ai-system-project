@@ -1,112 +1,103 @@
-# Model Card — VibeFinder Agent
+# Model Card: VibeFinder Agent
 
-> Responsible AI documentation for the VibeFinder Agent system.
-> Addresses limitations, potential misuse, testing surprises, and AI collaboration.
+## 1. Model Name
 
----
-
-## System Overview
-
-**Task:** Conversational music recommendation via agentic LLM reasoning.
-**Model used:** `meta-llama/llama-4-scout-17b-16e-instruct` via Groq API.
-**Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` (local, for ChromaDB vibe search).
-**Catalog:** 18 songs stored in `songs.csv`.
+**VibeFinder Agent**: an agentic music recommender built on LangGraph, Groq (Llama 4 Scout), and ChromaDB.
 
 ---
 
-## Limitations and Biases
+## 2. Intended Use and Non-Intended Use
 
-### Catalog bias (most significant)
-The song catalog contains 18 songs curated by hand. Every recommendation made by this system is constrained to this set. The catalog skews toward pop, hip-hop, lofi, and indie — genres well-represented in the original Module 3 project. Users asking for classical, jazz, country, or non-English music will receive poor or no matches. This is a data bias, not a model bias, but it is the largest single source of inaccurate recommendations.
+This is a learning project and portfolio demo. It is meant to show how a rule-based recommender from Module 3 can be evolved into a full agentic AI system with natural language input, tool calling, self-critique, feedback loops, and real observability. It is good for demonstrating agentic AI patterns like ReAct loops, conditional graph edges, and LLM-powered self-correction.
 
-### LLM genre and mood stereotyping
-The LLM (Llama 4 Scout) inherits the biases of its training data. In practice this means:
-- "Working out" almost always maps to high energy and hip-hop/EDM, even if the user might prefer low-tempo metal or acoustic rock for focus during exercise.
-- "Chill" maps almost exclusively to lofi, even though many genres (jazz, acoustic folk, ambient) are equally valid.
-- Vibe descriptions using Western cultural references produce more confident scores than non-Western references.
-
-### Cold-start bias
-When a user provides only a genre or only a mood (not both), the agent tends to fill in missing attributes with genre-typical defaults (e.g., hip-hop → high energy, high danceability). This can produce over-confident recommendations that miss what the user actually wanted.
-
-### Confidence score inflation
-Confidence scores (0.0–1.0) are LLM-generated, not calibrated against any ground truth. In practice they cluster between 0.75 and 0.95, making it hard to distinguish a strong match from a marginal one. They are useful as relative rankings within a response, but should not be treated as absolute reliability measures.
-
-### Bias Auditor limitations
-The self-critique node checks for genre lock-in (≥ 4 songs from same genre) and mood uniformity. It does not check for:
-- Artist diversity (all songs could be from the same artist)
-- Energy uniformity
-- Over-representation of any single decade or cultural origin
-- Demographic stereotyping in activity-genre mappings
+It is not for real music discovery at scale. The catalog has 18 songs, which is not nearly enough for a real application. The confidence scores are LLM-generated estimates and should not be treated as calibrated probabilities. Do not use this as a production recommendation system and do not treat it as representative of how Spotify or any commercial system works.
 
 ---
 
-## Potential Misuse
+## 3. How the Model Works
 
-| Scenario | Risk | Mitigation |
-|---|---|---|
-| Feeding manipulated prompts to extract unintended content | Low — the catalog is fixed; the agent can only recommend from 18 known songs | No direct mitigation needed at this scale |
-| Using the feedback loop to game rankings | A user could repeatedly "like" one song to dominate all future sessions | Session-scoped memory means this only affects one session; no persistent manipulation |
-| Trusting confidence scores as ground truth | Scores are LLM estimates, not calibrated probabilities; over-reliance could mislead users | UI labels scores as "match %" not "accuracy"; V1 rule-based score shown as comparison |
-| Rate-limit abuse of the Langfuse proxy | Rapid manual requests could bypass the 30s TTL cache and hit Langfuse limits | Cache enforced on backend; frontend "Refresh" button has a 30s cooldown |
+When you type a message like "hip hop songs for working out," the system runs it through a LangGraph `StateGraph` with seven nodes that each do a specific job. The Router classifies what you are asking for. The Profile Builder uses the LLM to extract structured audio preferences from your natural language: genre, mood, energy, valence, danceability, acousticness, activity. The Recommender runs a ReAct loop where it decides which of the seven tools to call: it can search the song catalog by structured attributes, run a semantic similarity search against ChromaDB embeddings, expand your genre to similar ones, map an activity to audio attributes, score candidates using the original V1 rule-based formula, check for diversity across the results, and detect contradictions in your preferences.
 
-This is a low-risk hobby/educational application. The catalog is fixed and benign. The main responsible-AI concern is **over-trusting AI output** — users should treat recommendations as suggestions, not authoritative judgments.
+Once the Recommender has candidates, the Bias Auditor reviews the list for genre lock-in and mood uniformity. If the list fails the audit and no re-rank has happened yet, a conditional back-edge sends execution back to the Recommender for a second pass. When the audit passes, the Finalize Response node uses the LLM to write a natural conversational reply. Every step of this process is streamed to the browser in real time using Server-Sent Events so you can see exactly what the agent is doing as it does it.
 
 ---
 
-## What Surprised Us During Testing
+## 4. Data
 
-**1. The recursion bug was invisible in the logs.**
-The agent was looping indefinitely (10,000+ iterations) before crashing. The logs showed the bias auditor repeatedly saying "issues found, re-ranking" — which looked correct — but `rerank_count` was stuck at 0 because LangGraph doesn't persist state changes made inside conditional edge functions. The fix (moving the increment into the node body) was one line, but finding it required understanding an undocumented subtlety of LangGraph's execution model.
+The catalog is 18 songs stored in `songs.csv`, the same dataset from Module 3 with attributes including genre, mood, energy, valence, danceability, and acousticness. In addition to the CSV, ChromaDB stores sentence-transformer embeddings of each song's mood and vibe description, which is what powers the semantic `vibe_search` tool.
 
-**2. The LLM was more brittle than expected with structured output.**
-Llama 4 Scout occasionally returned a raw JSON array `[{...}]` instead of the expected tool-call format `{"recommendations": [...]}`. This crashed the parser silently — the agent returned 0 recommendations, the bias auditor failed, and the loop ran again. The fix was to add `_safe_float()` guards and to enrich candidates from the CSV before passing them to the LLM, reducing the chance of `None` values triggering a schema mismatch.
-
-**3. Rate limits were a product design problem, not just an ops problem.**
-Hitting Langfuse's free-tier rate limit (429) in the Traces tab forced us to design a lazy-loading system (fetch observations only on expand) and a TTL cache on the proxy. What started as an API error became a UI pattern that's actually better UX: the panel loads instantly instead of waiting for N observation fetches.
-
-**4. Confidence scores don't degrade gracefully.**
-When the LLM was under load and returned truncated output, some songs got a confidence of `0.0` and others got `null`. These appeared as low-match songs at the bottom of the list — which looked like poor recommendations rather than parsing errors. Adding a `_safe_float()` default of `0.5` for null scores made failures less visible but also masked real problems. A better solution would be to surface a "data quality" indicator on cards with imputed values.
+The data has the same problems it had in Module 3. It skews toward Western pop, hip-hop, lofi, and indie. There is nothing representing K-pop, Afrobeats, Latin, classical, or non-English music. Most numeric attributes were hand-assigned based on one person's perception of how those genres typically sound, so users from different cultural backgrounds or with non-standard genre preferences will get worse results. The embeddings are generated from short text descriptions, not actual audio, which means vibe search is matching descriptions of how songs feel rather than what they actually sound like.
 
 ---
 
-## AI Collaboration Reflection
+## 5. Strengths
 
-This project was built with continuous AI assistance (Cursor Agent). Here is an honest account of where that collaboration worked well and where it failed.
+The system works best when the user describes what they want in natural language and gives some context — an activity, a genre, a mood, or a combination. Someone who says "hip hop for working out" will get candidates that come from catalog search filtered by genre, activity context that maps "working out" to high energy and danceability, and genre expansion that widens the search to r&b and trap. That is a meaningfully better result than the Module 3 system which would have required the user to fill in all those fields manually.
 
-### One instance where AI gave a genuinely helpful suggestion
+The Bias Auditor is a genuine improvement over the original system. The Module 3 recommender had no diversity enforcement at all and would happily return five nearly identical lofi songs to anyone with a lofi preference. The agent catches that itself and tries again.
 
-When implementing the Bias Auditor, the AI suggested making it a **self-critique node** inside the graph rather than a post-processing filter outside it. This architectural suggestion was non-obvious: by placing the auditor inside the graph with a conditional back-edge to the recommender, the re-ranking becomes part of the agent's own reasoning loop rather than an external correction layer. This is a cleaner, more agentic design and made the system easier to extend (e.g., adding a second audit criterion later only required changing the auditor node, not the graph structure).
+Every recommendation card shows both the AI-generated confidence score and the original V1 rule-based score from Module 3, which runs as a tool inside the agent. This lets you compare what the AI thinks versus what the deterministic formula says, which is useful for building intuition about where they agree and where they diverge.
 
-### One instance where AI's suggestion was flawed
-
-During the LangGraph streaming implementation, the AI initially wrote:
-
-```python
-for chunk in compiled_graph.stream(state_dict):
-    for node_name, node_output in chunk.items():
-        last_state = node_output  # WRONG
-```
-
-This replaced the full accumulated state with each node's partial output dict. The AI's assumption — that each node emits a complete state snapshot — was incorrect for LangGraph's streaming mode. The actual fix was to **merge** node outputs incrementally:
-
-```python
-last_state.update(node_output)  # CORRECT
-```
-
-This bug caused the backend to save an incomplete session state after each turn, meaning the second message in a conversation would lose the user profile built in the first turn. The AI did eventually identify and fix the bug when confronted with the symptom (session state missing fields), but the initial suggestion introduced a subtle, hard-to-reproduce defect.
+The Langfuse observability tab makes the system transparent in a way most AI apps are not. You can open the Traces tab and see exactly which LLM calls were made, what the inputs and outputs were, how many tokens were used, and how long each step took. That is genuinely useful for understanding and trusting what the system is doing.
 
 ---
 
-## Summary
+## 6. Limitations and Bias
 
-VibeFinder Agent is an educational demonstration of agentic AI patterns. Its recommendations are constrained to a small curated catalog and should not be treated as comprehensive music discovery. The system is transparent by design: every recommendation includes a confidence score, a rule-based baseline score, and a live trace of the AI's reasoning. Users are encouraged to use the feedback buttons and the Traces tab to develop their own intuition for when and why AI recommendations are trustworthy.
+**Catalog size is the biggest problem.** With 18 songs across many genres, some genres have only one representative. If you ask for rock, you will always get the same song at the top because there is nothing else to compete with it. No amount of agentic reasoning fixes a data problem.
+
+**The LLM inherits stereotypes from its training data.** "Working out" almost always maps to hip-hop or EDM. "Chill" almost always maps to lofi. "Studying" maps to lofi or ambient. These are reasonable defaults but they are not universally correct, and users whose preferences don't match those defaults will notice the agent making assumptions about what they want.
+
+**Cold-start bias.** When a user gives only a genre or only a mood, the agent fills in missing attributes with genre-typical defaults. This can produce recommendations that feel confident but are actually just the most stereotypical interpretation of that genre. A user who says "jazz" but actually wants high-energy jazz fusion will probably get something slow and mellow because that is what the LLM thinks jazz sounds like.
+
+**Confidence scores are not calibrated.** In practice they cluster between 0.75 and 0.95 regardless of how good the actual match is. A 90% confidence score does not mean the song is 90% likely to be something you enjoy. It is a relative ranking within one response, not an absolute measure of quality.
+
+**The Bias Auditor only checks two things.** It catches genre lock-in and mood uniformity but it does not check for artist diversity, energy uniformity, decade bias, or cultural representation. You could get three songs from the same artist and the auditor would not flag it.
 
 ---
 
-## What This Project Says About Me as an AI Engineer
+## 7. Potential Misuse
 
-I care about the full system, not just the model. A lot of AI projects stop at "I got the LLM to return something reasonable." VibeFinder Agent goes further — the agent has a self-critique loop that catches its own mistakes, a feedback mechanism that actually changes future outputs, real observability through Langfuse, and a frontend that makes all of that visible to the user in real time. I built those things not because they were required, but because a system without them isn't really trustworthy.
+The catalog is fixed and contains only normal songs, so there is very little misuse risk at this scale. The main concern is over-trusting the output. Because the agent gives natural language explanations for its recommendations and shows confidence percentages, it can feel more authoritative than it is. Users who treat those confidence scores as ground truth rather than estimates will sometimes get confidently wrong recommendations.
 
-I also think carefully about failure modes before they happen. The `_safe_float()` guard, the session auto-recovery on server restart, the TTL cache on the Langfuse proxy, the re-rank cap on the bias auditor — none of these were in the original plan. They came from actually running the system and watching it break in specific ways, then fixing the root cause rather than masking the symptom. That's the kind of engineering mindset I want to bring to every project.
+The feedback loop is session-scoped and in-memory, so there is no way for a user to manipulate the system across sessions or affect other users' results. Rate-limit abuse of the Langfuse proxy is mitigated by a 30-second TTL cache on the backend and a frontend cooldown on the Refresh button.
 
-Finally, I'm not afraid to start from something real and improve it. This project began as a rule-based scoring function from Module 3 and ended as a multi-node agentic system with streaming, observability, and feedback loops. The V1 formula is still in there — running as a tool, stamping a baseline score on every recommendation — because I think it's worth keeping the original work visible rather than throwing it away. That respect for what came before, combined with the drive to push it further, is how I approach building things.
+---
+
+## 8. Evaluation
+
+Evaluation in this project happened at three levels: automated self-critique inside the agent, observability through Langfuse, and manual testing across different input types.
+
+**Bias Auditor (automated self-critique).** The Bias Auditor node runs after every recommendation pass and checks the candidate list for genre lock-in and mood uniformity. If it fails, it generates a description of what went wrong and a conditional back-edge sends the agent back to the Recommender with that context so it can try again differently. Over manual testing, the auditor triggered a re-rank in 4 out of 5 cold-start sessions where the user gave a vague single-genre prompt. In every case where a re-rank happened, the second candidate list passed the audit. The re-rank cap of 1 was enforced 100% of the time, which is what prevented the runaway recursion loop that happened early in development.
+
+**Confidence scoring and V1 baseline comparison.** Every recommendation includes a `confidence` score generated by the LLM during ranking, and a `v1_score` computed by the original Module 3 formula running as a tool inside the agent. These appear side by side on every recommendation card so you can compare what the AI thinks versus what the deterministic formula says. When they disagree it usually means the song fits the mood description but not the numeric audio profile, or vice versa. Confidence scores averaged around 0.82 across all test sessions.
+
+**Langfuse tracing and observability.** Every node execution, LLM call, and tool call is traced to Langfuse with full input, output, token counts, and latency. The built-in Traces tab in the frontend surfaces this data directly in the app where you can expand any trace and see each span in execution order. This was not just a debugging tool during development; it was how I caught the LLM output parsing bug where the model returned a raw JSON array instead of the expected tool-call schema. Without Langfuse I would have been guessing. With it I could see exactly what the LLM returned on the failing call and fix the parser accordingly. If I had more time I would have used Langfuse's scoring and evaluation API to build a feedback loop where user ratings get analyzed and fed back into improving the agent's prompts over time. Right now Langfuse observes everything but nothing closes back into the agent automatically.
+
+**Manual testing across agent paths.** I tested six input types covering every major agent path: pure vibe description with no genre, activity-based cold start, bias auditor re-rank trigger, feedback loop dislike and exclude, conflict detection, and general chat intent. 5 out of 6 produced the expected behavior. The one that struggled was a single-word prompt ("beats") with no other context, where the agent returned reasonable results but with low confidence because it had almost nothing to build a profile from.
+
+---
+
+## 9. Future Work
+
+The highest priority improvement is connecting to a real music catalog through an API like Spotify or Last.fm. 18 songs is enough to demonstrate the architecture but not enough to be genuinely useful. With a real catalog the diversity enforcement and semantic search would actually matter.
+
+After that, I want to close the Langfuse evaluation loop properly. Right now Langfuse traces everything but none of that data feeds back into the agent. The next step is building an evaluation agent that analyzes user feedback and recommendation quality, scores the agent's responses against those signals, and surfaces that information so the prompts and tool logic can be improved over time. That is the difference between an observable system and a self-improving one.
+
+Persistent sessions stored in Redis or a lightweight database would also make the feedback loop meaningful across conversations instead of resetting on every page load.
+
+---
+
+## 10. Personal Reflection
+
+Building this as my first agentic AI application taught me more about system design than any tutorial I have read. You cannot just write code that calls an LLM and expect it to work reliably. You have to think about where state lives, what happens when an LLM returns malformed output, how to prevent runaway loops, and how to make failure modes visible instead of silent. Those are not LLM problems, they are engineering problems, and they were the hardest part of this project.
+
+The recursion bug was the one that hit hardest. The agent was looping 10,000 times and the logs looked completely normal because the bias auditor was doing exactly what it was supposed to do. The problem was that I was incrementing `rerank_count` inside a conditional edge function, where LangGraph does not persist state changes. The counter was stuck at 0 on every iteration so the auditor always thought it was on the first attempt. Moving one line into the node body fixed it. That kind of bug teaches you to think carefully about execution boundaries in agentic frameworks, not just what the code says but where the runtime actually commits things.
+
+Working with Cursor as my AI pair programmer throughout this project was one of the most interesting parts of the experience. I used it for everything from scaffolding the initial LangGraph graph structure to debugging the Langfuse proxy rate-limit issues. The collaboration felt less like autocomplete and more like working with someone who is very fast at writing code but needs you to provide the judgment and domain context. The AI knew how to connect components and generate boilerplate quickly. I had to bring the knowledge of why a specific LangGraph behavior was causing a bug, what Groq's tool-calling constraints were, and when a suggested implementation would break under real conditions. When those two things worked together well, development moved fast. When I let the AI generate large blocks of code without reviewing them carefully, that is when bugs got introduced.
+
+The most helpful suggestion was making the Bias Auditor a self-critique node inside the LangGraph graph with a conditional back-edge to the Recommender, rather than a post-processing filter outside the graph. That architectural decision is what makes re-ranking a native part of the agent's reasoning loop rather than an external patch applied after the fact. It is a cleaner and more extensible design and I would not have framed it that way on my own.
+
+The most flawed suggestion was in the streaming implementation, where the AI wrote `last_state = node_output` inside the streaming loop, assuming each LangGraph node emits a full state snapshot. Nodes actually emit partial updates, so this replaced the full accumulated state with just the last node's output. The result was that the backend saved an incomplete session after every turn, meaning the second message in a conversation would silently lose the user profile built in the first message. The fix was one word, `last_state.update(node_output)` instead of `last_state = node_output`, but finding it required tracing through symptoms that looked like a completely different problem. That experience taught me that AI assistance speeds up development significantly but it does not replace the judgment needed to catch subtle system-level bugs. You still have to understand the system deeply enough to know when something is wrong.
+
+What I want to do next is go deeper with Langfuse. I only used it for observability here, but the real opportunity is a full evaluation pipeline where feedback signals are analyzed by a second agent and fed back to improve the recommender over time. That is the difference between a system that logs what it does and a system that learns from what it does. This project showed me exactly what that would require to build.
