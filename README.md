@@ -267,3 +267,10 @@ streamlit run backend/streamlit_app.py
 
 ## Reflection
 
+Building VibeFinder Agent taught me that the hardest part of AI engineering isn't getting the model to work — it's building a system around it that fails gracefully, stays observable, and actually does what you think it does.
+
+The recursion bug was the clearest example of this. The agent was looping thousands of times and the logs looked completely normal — the bias auditor kept reporting "issues found, re-ranking" which is exactly what it's supposed to say. The problem wasn't the logic, it was where the logic lived. LangGraph only persists state changes that happen inside nodes. I was incrementing `rerank_count` inside a conditional edge function, so the counter never actually saved, and the auditor thought it was always on the first attempt. Moving one line of code fixed it. That kind of bug teaches you to think very carefully about execution boundaries in agentic systems, not just what the code says but where the runtime actually commits things.
+
+The LLM brittleness was a different kind of lesson. I kept assuming that if I wrote a good enough prompt, the model would return clean structured output every time. It doesn't. When context gets long or the rate limit is close, you get truncated JSON, wrong schemas, or silent failures that cascade into zero recommendations, which then cause the bias auditor to fail, which triggers a re-rank, which makes the context even longer. The fix was to stop trusting the LLM to deliver perfect output and instead build the system to handle imperfect output gracefully — safer parsing, enriching data before it reaches the LLM, and capping re-rank attempts.
+
+The last thing I learned is that observability changes how you build. Once Langfuse was showing me every LLM call in real time, I stopped guessing about what was happening inside the agent and started seeing it. That shift from debugging by intuition to debugging with data is probably the most transferable skill I got from this project.

@@ -100,3 +100,13 @@ This bug caused the backend to save an incomplete session state after each turn,
 ## Summary
 
 VibeFinder Agent is an educational demonstration of agentic AI patterns. Its recommendations are constrained to a small curated catalog and should not be treated as comprehensive music discovery. The system is transparent by design: every recommendation includes a confidence score, a rule-based baseline score, and a live trace of the AI's reasoning. Users are encouraged to use the feedback buttons and the Traces tab to develop their own intuition for when and why AI recommendations are trustworthy.
+
+---
+
+## What This Project Says About Me as an AI Engineer
+
+I care about the full system, not just the model. A lot of AI projects stop at "I got the LLM to return something reasonable." VibeFinder Agent goes further — the agent has a self-critique loop that catches its own mistakes, a feedback mechanism that actually changes future outputs, real observability through Langfuse, and a frontend that makes all of that visible to the user in real time. I built those things not because they were required, but because a system without them isn't really trustworthy.
+
+I also think carefully about failure modes before they happen. The `_safe_float()` guard, the session auto-recovery on server restart, the TTL cache on the Langfuse proxy, the re-rank cap on the bias auditor — none of these were in the original plan. They came from actually running the system and watching it break in specific ways, then fixing the root cause rather than masking the symptom. That's the kind of engineering mindset I want to bring to every project.
+
+Finally, I'm not afraid to start from something real and improve it. This project began as a rule-based scoring function from Module 3 and ended as a multi-node agentic system with streaming, observability, and feedback loops. The V1 formula is still in there — running as a tool, stamping a baseline score on every recommendation — because I think it's worth keeping the original work visible rather than throwing it away. That respect for what came before, combined with the drive to push it further, is how I approach building things.
